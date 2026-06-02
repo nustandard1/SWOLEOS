@@ -6,7 +6,7 @@ import { supabase } from './app/lib/supabase';
 import LoginScreen from './app/screens/LoginScreen';
 import SignupScreen from './app/screens/SignupScreen';
 import OnboardingScreen from './app/screens/OnboardingScreen';
-import TabNavigator from './app/navigation/TabNavigator';
+import RootNavigator from './app/navigation/RootNavigator';
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
@@ -65,7 +65,7 @@ export default function App() {
 
   return (
     <NavigationContainer>
-      <TabNavigator />
+      <RootNavigator />
     </NavigationContainer>
   );
 }

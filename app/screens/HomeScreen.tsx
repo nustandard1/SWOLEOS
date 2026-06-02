@@ -7,9 +7,15 @@ import {
   TouchableOpacity,
   SafeAreaView,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
+import { RootStackParamList } from '../navigation/RootNavigator';
 import { supabase } from '../lib/supabase';
 
+type NavProp = NativeStackNavigationProp<RootStackParamList>;
+
 export default function HomeScreen() {
+  const navigation = useNavigation<NavProp>();
   const [name, setName] = useState('');
 
   useEffect(() => {
@@ -50,7 +56,7 @@ export default function HomeScreen() {
         </View>
 
         {/* Start Workout CTA */}
-        <TouchableOpacity style={styles.startButton}>
+        <TouchableOpacity style={styles.startButton} onPress={() => navigation.navigate('WorkoutLogger')}>
           <Text style={styles.startButtonText}>Start Workout</Text>
           <Text style={styles.startButtonSub}>Log today's session</Text>
         </TouchableOpacity>
