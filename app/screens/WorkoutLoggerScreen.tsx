@@ -5,12 +5,13 @@ import {
   FlatList, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import { supabase } from '../lib/supabase';
-import { getLastSession, getProgressionTargets, formatSessionDate, SetData, ExerciseHistory } from '../lib/intelligence';
+import { getLastSession, getProgressionTargets, formatSessionDate, ExerciseHistory } from '../lib/intelligence';
 
 interface Exercise {
   id: string;
   name: string;
   primary_muscle: string;
+  is_custom?: boolean;
 }
 
 interface LoggedSet {
@@ -27,12 +28,30 @@ interface LoggedExercise {
   showHistory: boolean;
 }
 
+const MUSCLE_GROUPS = [
+  { label: 'All', value: '' },
+  { label: 'Chest', value: 'chest' },
+  { label: 'Back', value: 'back' },
+  { label: 'Delts', value: 'delts' },
+  { label: 'Arms', value: 'arms' },
+  { label: 'Quads', value: 'quads' },
+  { label: 'Hamstrings', value: 'hamstrings' },
+  { label: 'Glutes', value: 'glutes' },
+  { label: 'Calves', value: 'calves' },
+  { label: 'Abs', value: 'abs' },
+];
+
 export default function WorkoutLoggerScreen({ onFinish }: { onFinish: () => void }) {
   const [sessionName, setSessionName] = useState('');
   const [exercises, setExercises] = useState<LoggedExercise[]>([]);
   const [showExercisePicker, setShowExercisePicker] = useState(false);
+  const [showAddCustom, setShowAddCustom] = useState(false);
   const [allExercises, setAllExercises] = useState<Exercise[]>([]);
   const [search, setSearch] = useState('');
+  const [muscleFilter, setMuscleFilter] = useState('');
+  const [customName, setCustomName] = useState('');
+  const [customMuscle, setCustomMuscle] = useState('');
+  const [savingCustom, setSavingCustom] = useState(false);
   const [saving, setSaving] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -40,31 +59,69 @@ export default function WorkoutLoggerScreen({ onFinish }: { onFinish: () => void
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
-      if (data.user) setUserId(data.user.id);
+      if (data.user) {
+        setUserId(data.user.id);
+        loadExercises(data.user.id);
+      }
     });
-    loadExercises();
     timerRef.current = setInterval(() => setElapsedSeconds(s => s + 1), 1000);
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, []);
 
-  async function loadExercises() {
-    const { data } = await supabase
-      .from('exercises')
-      .select('id, name, primary_muscle')
-      .order('name');
-    if (data) setAllExercises(data);
+  async function loadExercises(uid: string) {
+    const [{ data: standard }, { data: custom }] = await Promise.all([
+      supabase.from('exercises').select('id, name, primary_muscle').order('name'),
+      supabase.from('custom_exercises').select('id, name, primary_muscle').eq('user_id', uid).order('name'),
+    ]);
+
+    const standardList: Exercise[] = standard || [];
+    const customList: Exercise[] = (custom || []).map(e => ({ ...e, is_custom: true }));
+    setAllExercises([...customList, ...standardList]);
+  }
+
+  async function addCustomExercise() {
+    if (!customName.trim()) {
+      Alert.alert('Name required', 'Enter a name for your exercise.');
+      return;
+    }
+    if (!customMuscle) {
+      Alert.alert('Muscle group required', 'Select a muscle group.');
+      return;
+    }
+    if (!userId) return;
+
+    setSavingCustom(true);
+    const { data, error } = await supabase
+      .from('custom_exercises')
+      .insert({ user_id: userId, name: customName.trim(), primary_muscle: customMuscle })
+      .select()
+      .single();
+    setSavingCustom(false);
+
+    if (error || !data) {
+      Alert.alert('Error', 'Could not save exercise. Try again.');
+      return;
+    }
+
+    const newExercise: Exercise = { ...data, is_custom: true };
+    setAllExercises(prev => [newExercise, ...prev]);
+    setCustomName('');
+    setCustomMuscle('');
+    setShowAddCustom(false);
+    // Auto-add it to the session
+    addExercise(newExercise);
   }
 
   async function addExercise(exercise: Exercise) {
     setShowExercisePicker(false);
     setSearch('');
+    setMuscleFilter('');
 
     let history: ExerciseHistory | null = null;
     if (userId) {
       history = await getLastSession(userId, exercise.id);
     }
 
-    // Pre-fill sets from last session or default to 3 empty sets
     const defaultSets: LoggedSet[] = history?.sets.length
       ? history.sets.map(s => ({
           weight: s.weight?.toString() || '',
@@ -78,12 +135,7 @@ export default function WorkoutLoggerScreen({ onFinish }: { onFinish: () => void
           { weight: '', reps: '', rpe: '', is_warmup: false },
         ];
 
-    setExercises(prev => [...prev, {
-      exercise,
-      sets: defaultSets,
-      history,
-      showHistory: true,
-    }]);
+    setExercises(prev => [...prev, { exercise, sets: defaultSets, history, showHistory: true }]);
   }
 
   function updateSet(exIdx: number, setIdx: number, field: keyof LoggedSet, value: string | boolean) {
@@ -91,9 +143,7 @@ export default function WorkoutLoggerScreen({ onFinish }: { onFinish: () => void
       const updated = [...prev];
       updated[exIdx] = {
         ...updated[exIdx],
-        sets: updated[exIdx].sets.map((s, i) =>
-          i === setIdx ? { ...s, [field]: value } : s
-        ),
+        sets: updated[exIdx].sets.map((s, i) => i === setIdx ? { ...s, [field]: value } : s),
       };
       return updated;
     });
@@ -115,10 +165,7 @@ export default function WorkoutLoggerScreen({ onFinish }: { onFinish: () => void
     setExercises(prev => {
       const updated = [...prev];
       if (updated[exIdx].sets.length <= 1) return prev;
-      updated[exIdx] = {
-        ...updated[exIdx],
-        sets: updated[exIdx].sets.filter((_, i) => i !== setIdx),
-      };
+      updated[exIdx] = { ...updated[exIdx], sets: updated[exIdx].sets.filter((_, i) => i !== setIdx) };
       return updated;
     });
   }
@@ -158,11 +205,7 @@ export default function WorkoutLoggerScreen({ onFinish }: { onFinish: () => void
       const ex = exercises[i];
       const { data: sessionEx } = await supabase
         .from('session_exercises')
-        .insert({
-          workout_session_id: session.id,
-          exercise_id: ex.exercise.id,
-          exercise_order: i + 1,
-        })
+        .insert({ workout_session_id: session.id, exercise_id: ex.exercise.id, exercise_order: i + 1 })
         .select()
         .single();
 
@@ -196,10 +239,18 @@ export default function WorkoutLoggerScreen({ onFinish }: { onFinish: () => void
     return `${m}:${s.toString().padStart(2, '0')}`;
   }
 
-  const filteredExercises = allExercises.filter(e =>
-    e.name.toLowerCase().includes(search.toLowerCase()) ||
-    e.primary_muscle.toLowerCase().includes(search.toLowerCase())
-  );
+  function getSetLabel(sets: LoggedSet[], setIdx: number): string {
+    const set = sets[setIdx];
+    if (set.is_warmup) return 'W';
+    const workingSetsBefore = sets.slice(0, setIdx).filter(s => !s.is_warmup).length;
+    return (workingSetsBefore + 1).toString();
+  }
+
+  const filteredExercises = allExercises.filter(e => {
+    const matchesSearch = !search || e.name.toLowerCase().includes(search.toLowerCase());
+    const matchesMuscle = !muscleFilter || e.primary_muscle === muscleFilter;
+    return matchesSearch && matchesMuscle;
+  });
 
   return (
     <SafeAreaView style={styles.safe}>
@@ -236,10 +287,16 @@ export default function WorkoutLoggerScreen({ onFinish }: { onFinish: () => void
             return (
               <View key={exIdx} style={styles.exerciseCard}>
 
-                {/* Exercise Header */}
                 <View style={styles.exerciseHeader}>
                   <View style={styles.exerciseTitleRow}>
-                    <Text style={styles.exerciseName}>{ex.exercise.name}</Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Text style={styles.exerciseName}>{ex.exercise.name}</Text>
+                      {ex.exercise.is_custom && (
+                        <View style={styles.customBadge}>
+                          <Text style={styles.customBadgeText}>CUSTOM</Text>
+                        </View>
+                      )}
+                    </View>
                     <Text style={styles.muscleTag}>{ex.exercise.primary_muscle}</Text>
                   </View>
                   <TouchableOpacity onPress={() => removeExercise(exIdx)}>
@@ -257,9 +314,7 @@ export default function WorkoutLoggerScreen({ onFinish }: { onFinish: () => void
                       return updated;
                     })}
                   >
-                    <Text style={styles.historyLabel}>
-                      Last session · {formatSessionDate(ex.history.date)}
-                    </Text>
+                    <Text style={styles.historyLabel}>Last session · {formatSessionDate(ex.history.date)}</Text>
                     <Text style={styles.historyToggle}>{ex.showHistory ? '▲' : '▼'}</Text>
                   </TouchableOpacity>
                 )}
@@ -274,8 +329,6 @@ export default function WorkoutLoggerScreen({ onFinish }: { onFinish: () => void
                     <Text style={styles.historyVolume}>
                       Total volume: {ex.history.total_volume.toLocaleString()} lbs · {ex.history.total_reps} reps
                     </Text>
-
-                    {/* Potential Targets */}
                     {targets && (
                       <View style={styles.targetsSection}>
                         <Text style={styles.targetsTitle}>Potential targets:</Text>
@@ -302,9 +355,7 @@ export default function WorkoutLoggerScreen({ onFinish }: { onFinish: () => void
                       style={[styles.setNumBtn, set.is_warmup && styles.setNumBtnWarmup]}
                       onPress={() => updateSet(exIdx, setIdx, 'is_warmup', !set.is_warmup)}
                     >
-                      <Text style={styles.setNumText}>
-                        {set.is_warmup ? 'W' : setIdx + 1 - ex.sets.slice(0, setIdx).filter(s => !s.is_warmup).length + ex.sets.slice(0, setIdx).filter(s => !s.is_warmup).length - ex.sets.slice(0, setIdx).filter(s => !s.is_warmup).length}
-                      </Text>
+                      <Text style={styles.setNumText}>{getSetLabel(ex.sets, setIdx)}</Text>
                     </TouchableOpacity>
                     <TextInput
                       style={styles.setInput}
@@ -343,7 +394,6 @@ export default function WorkoutLoggerScreen({ onFinish }: { onFinish: () => void
             );
           })}
 
-          {/* Add Exercise Button */}
           <TouchableOpacity style={styles.addExerciseBtn} onPress={() => setShowExercisePicker(true)}>
             <Text style={styles.addExerciseBtnText}>+ Add Exercise</Text>
           </TouchableOpacity>
@@ -353,31 +403,119 @@ export default function WorkoutLoggerScreen({ onFinish }: { onFinish: () => void
         {/* Exercise Picker Modal */}
         <Modal visible={showExercisePicker} animationType="slide">
           <SafeAreaView style={styles.modalSafe}>
+
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Add Exercise</Text>
-              <TouchableOpacity onPress={() => { setShowExercisePicker(false); setSearch(''); }}>
+              <TouchableOpacity onPress={() => { setShowExercisePicker(false); setSearch(''); setMuscleFilter(''); }}>
                 <Text style={styles.modalClose}>Done</Text>
               </TouchableOpacity>
             </View>
+
+            {/* Search */}
             <TextInput
               style={styles.searchInput}
-              placeholder="Search exercises or muscle group..."
+              placeholder="Search exercises..."
               placeholderTextColor="#555"
               value={search}
               onChangeText={setSearch}
               autoFocus
             />
+
+            {/* Muscle Group Filter Chips */}
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              style={styles.chipsScroll}
+              contentContainerStyle={styles.chipsContent}
+            >
+              {MUSCLE_GROUPS.map(mg => (
+                <TouchableOpacity
+                  key={mg.value}
+                  style={[styles.chip, muscleFilter === mg.value && styles.chipActive]}
+                  onPress={() => setMuscleFilter(mg.value)}
+                >
+                  <Text style={[styles.chipText, muscleFilter === mg.value && styles.chipTextActive]}>
+                    {mg.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+
+            {/* Add Your Own */}
+            <TouchableOpacity style={styles.addCustomRow} onPress={() => setShowAddCustom(true)}>
+              <Text style={styles.addCustomText}>+ Add your own exercise</Text>
+            </TouchableOpacity>
+
             <FlatList
               data={filteredExercises}
               keyExtractor={item => item.id}
               renderItem={({ item }) => (
                 <TouchableOpacity style={styles.exercisePickerRow} onPress={() => addExercise(item)}>
-                  <Text style={styles.exercisePickerName}>{item.name}</Text>
+                  <View style={{ flex: 1 }}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                      <Text style={styles.exercisePickerName}>{item.name}</Text>
+                      {item.is_custom && (
+                        <View style={styles.customBadge}>
+                          <Text style={styles.customBadgeText}>CUSTOM</Text>
+                        </View>
+                      )}
+                    </View>
+                  </View>
                   <Text style={styles.exercisePickerMuscle}>{item.primary_muscle}</Text>
                 </TouchableOpacity>
               )}
               keyboardShouldPersistTaps="handled"
             />
+          </SafeAreaView>
+        </Modal>
+
+        {/* Add Custom Exercise Modal */}
+        <Modal visible={showAddCustom} animationType="slide" presentationStyle="pageSheet">
+          <SafeAreaView style={styles.modalSafe}>
+            <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+
+              <View style={styles.modalHeader}>
+                <TouchableOpacity onPress={() => { setShowAddCustom(false); setCustomName(''); setCustomMuscle(''); }}>
+                  <Text style={styles.cancelBtn}>Cancel</Text>
+                </TouchableOpacity>
+                <Text style={styles.modalTitle}>New Exercise</Text>
+                <TouchableOpacity onPress={addCustomExercise} disabled={savingCustom}>
+                  {savingCustom
+                    ? <ActivityIndicator color="#e8ff47" size="small" />
+                    : <Text style={styles.modalClose}>Save</Text>
+                  }
+                </TouchableOpacity>
+              </View>
+
+              <ScrollView style={{ flex: 1 }} contentContainerStyle={{ padding: 20 }} keyboardShouldPersistTaps="handled">
+
+                <Text style={styles.fieldLabel}>Exercise Name</Text>
+                <TextInput
+                  style={styles.fieldInput}
+                  placeholder="e.g. Meadows Row"
+                  placeholderTextColor="#444"
+                  value={customName}
+                  onChangeText={setCustomName}
+                  autoFocus
+                />
+
+                <Text style={[styles.fieldLabel, { marginTop: 24 }]}>Muscle Group</Text>
+                <View style={styles.muscleGrid}>
+                  {MUSCLE_GROUPS.filter(m => m.value !== '').map(mg => (
+                    <TouchableOpacity
+                      key={mg.value}
+                      style={[styles.muscleOption, customMuscle === mg.value && styles.muscleOptionActive]}
+                      onPress={() => setCustomMuscle(mg.value)}
+                    >
+                      <Text style={[styles.muscleOptionText, customMuscle === mg.value && styles.muscleOptionTextActive]}>
+                        {mg.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+              </ScrollView>
+            </KeyboardAvoidingView>
           </SafeAreaView>
         </Modal>
 
@@ -413,10 +551,16 @@ const styles = StyleSheet.create({
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     padding: 14, paddingBottom: 10,
   },
-  exerciseTitleRow: { flex: 1, gap: 6 },
+  exerciseTitleRow: { flex: 1, gap: 4 },
   exerciseName: { color: '#fff', fontSize: 16, fontWeight: '700' },
   muscleTag: { color: '#555', fontSize: 12, textTransform: 'capitalize' },
   removeExBtn: { color: '#444', fontSize: 18, paddingLeft: 12 },
+
+  customBadge: {
+    backgroundColor: '#1a1a00', borderRadius: 4, paddingHorizontal: 5, paddingVertical: 2,
+    borderWidth: 1, borderColor: '#3a3a00',
+  },
+  customBadgeText: { color: '#a8a000', fontSize: 9, fontWeight: '800', letterSpacing: 0.5 },
 
   historyBanner: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
@@ -463,6 +607,7 @@ const styles = StyleSheet.create({
   },
   addExerciseBtnText: { color: '#e8ff47', fontSize: 16, fontWeight: '700' },
 
+  // Modal
   modalSafe: { flex: 1, backgroundColor: '#0a0a0a' },
   modalHeader: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
@@ -470,14 +615,47 @@ const styles = StyleSheet.create({
   },
   modalTitle: { color: '#fff', fontSize: 18, fontWeight: '700' },
   modalClose: { color: '#e8ff47', fontSize: 15, fontWeight: '600' },
+
   searchInput: {
-    backgroundColor: '#1a1a1a', color: '#fff', margin: 12, borderRadius: 10,
+    backgroundColor: '#1a1a1a', color: '#fff', margin: 12, marginBottom: 0, borderRadius: 10,
     padding: 12, fontSize: 15, borderWidth: 1, borderColor: '#2a2a2a',
   },
+
+  chipsScroll: { maxHeight: 48, marginTop: 10 },
+  chipsContent: { paddingHorizontal: 12, gap: 8, alignItems: 'center' },
+  chip: {
+    paddingHorizontal: 14, paddingVertical: 7, borderRadius: 20,
+    backgroundColor: '#1a1a1a', borderWidth: 1, borderColor: '#2a2a2a',
+  },
+  chipActive: { backgroundColor: '#e8ff47', borderColor: '#e8ff47' },
+  chipText: { color: '#888', fontSize: 13, fontWeight: '600' },
+  chipTextActive: { color: '#000' },
+
+  addCustomRow: {
+    paddingHorizontal: 16, paddingVertical: 12,
+    borderBottomWidth: 1, borderBottomColor: '#1a1a1a',
+  },
+  addCustomText: { color: '#e8ff47', fontSize: 14, fontWeight: '700' },
+
   exercisePickerRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     paddingHorizontal: 16, paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: '#111',
   },
-  exercisePickerName: { color: '#fff', fontSize: 15, flex: 1 },
+  exercisePickerName: { color: '#fff', fontSize: 15 },
   exercisePickerMuscle: { color: '#555', fontSize: 12, textTransform: 'capitalize' },
+
+  // Add Custom Exercise form
+  fieldLabel: { color: '#888', fontSize: 12, fontWeight: '700', letterSpacing: 0.5, marginBottom: 8 },
+  fieldInput: {
+    backgroundColor: '#1a1a1a', color: '#fff', borderRadius: 10,
+    padding: 14, fontSize: 16, borderWidth: 1, borderColor: '#2a2a2a',
+  },
+  muscleGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  muscleOption: {
+    paddingHorizontal: 16, paddingVertical: 10, borderRadius: 10,
+    backgroundColor: '#1a1a1a', borderWidth: 1, borderColor: '#2a2a2a',
+  },
+  muscleOptionActive: { backgroundColor: '#e8ff47', borderColor: '#e8ff47' },
+  muscleOptionText: { color: '#888', fontSize: 14, fontWeight: '600' },
+  muscleOptionTextActive: { color: '#000' },
 });
