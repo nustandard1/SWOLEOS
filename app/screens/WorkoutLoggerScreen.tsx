@@ -4,6 +4,7 @@ import {
   TextInput, SafeAreaView, Alert, ActivityIndicator, Modal,
   FlatList, KeyboardAvoidingView, Platform,
 } from 'react-native';
+import { useNavigation } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import { getLastSession, getProgressionTargets, formatSessionDate, ExerciseHistory } from '../lib/intelligence';
 
@@ -41,7 +42,8 @@ const MUSCLE_GROUPS = [
   { label: 'Abs', value: 'abs' },
 ];
 
-export default function WorkoutLoggerScreen({ onFinish }: { onFinish: () => void }) {
+export default function WorkoutLoggerScreen() {
+  const navigation = useNavigation();
   const [sessionName, setSessionName] = useState('');
   const [exercises, setExercises] = useState<LoggedExercise[]>([]);
   const [showExercisePicker, setShowExercisePicker] = useState(false);
@@ -229,7 +231,7 @@ export default function WorkoutLoggerScreen({ onFinish }: { onFinish: () => void
 
     setSaving(false);
     Alert.alert('Workout saved!', `${name} has been logged.`, [
-      { text: 'Done', onPress: onFinish }
+      { text: 'Done', onPress: navigation.goBack }
     ]);
   }
 
@@ -260,7 +262,7 @@ export default function WorkoutLoggerScreen({ onFinish }: { onFinish: () => void
         <View style={styles.header}>
           <TouchableOpacity onPress={() => Alert.alert('Cancel Workout', 'Discard this session?', [
             { text: 'Keep Going', style: 'cancel' },
-            { text: 'Discard', style: 'destructive', onPress: onFinish },
+            { text: 'Discard', style: 'destructive', onPress: navigation.goBack },
           ])}>
             <Text style={styles.cancelBtn}>Cancel</Text>
           </TouchableOpacity>
