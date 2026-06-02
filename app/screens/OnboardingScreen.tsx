@@ -10,13 +10,13 @@ import {
 } from 'react-native';
 import { supabase } from '../lib/supabase';
 
-type Goal = 'build_muscle' | 'get_stronger' | 'hybrid_tactical' | 'fat_loss' | 'general_fitness';
+type Goal = 'build_muscle' | 'get_stronger' | 'hybrid_tactical_athlete' | 'fat_loss' | 'general_fitness';
 type Muscle = 'chest' | 'back' | 'delts' | 'arms' | 'quads' | 'hamstrings' | 'glutes' | 'calves';
 
 const GOALS = [
   { key: 'build_muscle', label: 'Build Muscle' },
   { key: 'get_stronger', label: 'Get Stronger' },
-  { key: 'hybrid_tactical', label: 'Hybrid / Tactical' },
+  { key: 'hybrid_tactical_athlete', label: 'Hybrid / Tactical / Athlete' },
   { key: 'fat_loss', label: 'Fat Loss' },
   { key: 'general_fitness', label: 'General Fitness' },
 ];
@@ -34,6 +34,8 @@ const MUSCLES: { key: Muscle; label: string }[] = [
   { key: 'calves', label: 'Calves' },
 ];
 
+const NO_FOCUS_KEY = 'balanced';
+
 // Volume recommendations by goal (sets/week)
 const VOLUME_TARGETS: Record<string, Record<string, string>> = {
   build_muscle: {
@@ -44,7 +46,7 @@ const VOLUME_TARGETS: Record<string, Record<string, string>> = {
     chest: '8–14', back: '10–16', delts: '8–12', arms: '6–10',
     quads: '10–16', hamstrings: '8–14', glutes: '8–12', calves: '6–10',
   },
-  hybrid_tactical: {
+  hybrid_tactical_athlete: {
     chest: '10–16', back: '12–18', delts: '10–16', arms: '8–12',
     quads: '10–16', hamstrings: '10–14', glutes: '8–12', calves: '6–10',
   },
@@ -60,9 +62,18 @@ const VOLUME_TARGETS: Record<string, Record<string, string>> = {
 
 export default function OnboardingScreen({ onComplete }: { onComplete: () => void }) {
   const [step, setStep] = useState(1);
-  const [goal, setGoal] = useState<Goal | null>(null);
+  const [goal, setGoal] = useState<Goal[]>([]);
+
+  function toggleGoal(g: Goal) {
+    if (goal.includes(g)) {
+      setGoal(goal.filter(x => x !== g));
+    } else {
+      setGoal([...goal, g]);
+    }
+  }
   const [days, setDays] = useState<number | null>(null);
   const [muscles, setMuscles] = useState<Muscle[]>([]);
+  const [balanced, setBalanced] = useState(false);
   const [saving, setSaving] = useState(false);
 
   function toggleMuscle(m: Muscle) {
@@ -79,7 +90,7 @@ export default function OnboardingScreen({ onComplete }: { onComplete: () => voi
     if (!user) return;
 
     await supabase.from('users').update({
-      goal,
+      goal: goal.join(','),
       training_days_per_week: days,
     }).eq('id', user.id);
 
@@ -98,24 +109,25 @@ export default function OnboardingScreen({ onComplete }: { onComplete: () => voi
     <SafeAreaView style={styles.safe}>
       <View style={styles.container}>
         <Text style={styles.stepLabel}>Step 1 of 4</Text>
-        <Text style={styles.question}>What is your main training goal?</Text>
+        <Text style={styles.question}>What are your training goals?</Text>
+        <Text style={styles.subtext}>Select all that apply.</Text>
         <View style={styles.options}>
           {GOALS.map(g => (
             <TouchableOpacity
               key={g.key}
-              style={[styles.optionBtn, goal === g.key && styles.optionSelected]}
-              onPress={() => setGoal(g.key as Goal)}
+              style={[styles.optionBtn, goal.includes(g.key as Goal) && styles.optionSelected]}
+              onPress={() => toggleGoal(g.key as Goal)}
             >
-              <Text style={[styles.optionText, goal === g.key && styles.optionTextSelected]}>
+              <Text style={[styles.optionText, goal.includes(g.key as Goal) && styles.optionTextSelected]}>
                 {g.label}
               </Text>
             </TouchableOpacity>
           ))}
         </View>
         <TouchableOpacity
-          style={[styles.nextBtn, !goal && styles.nextBtnDisabled]}
-          onPress={() => goal && setStep(2)}
-          disabled={!goal}
+          style={[styles.nextBtn, goal.length === 0 && styles.nextBtnDisabled]}
+          onPress={() => goal.length > 0 && setStep(2)}
+          disabled={goal.length === 0}
         >
           <Text style={styles.nextBtnText}>Next</Text>
         </TouchableOpacity>
@@ -162,17 +174,28 @@ export default function OnboardingScreen({ onComplete }: { onComplete: () => voi
       <View style={styles.container}>
         <Text style={styles.stepLabel}>Step 3 of 4</Text>
         <Text style={styles.question}>Any body parts you want to prioritize?</Text>
-        <Text style={styles.subtext}>Choose up to 3.</Text>
-        <View style={styles.muscleGrid}>
+        <Text style={styles.subtext}>Choose up to 3, or select Balanced.</Text>
+
+        {/* Balanced option */}
+        <TouchableOpacity
+          style={[styles.optionBtn, { marginBottom: 16 }, balanced && styles.optionSelected]}
+          onPress={() => { setBalanced(!balanced); setMuscles([]); }}
+        >
+          <Text style={[styles.optionText, balanced && styles.optionTextSelected]}>
+            No Focus / Balanced
+          </Text>
+        </TouchableOpacity>
+
+        <View style={[styles.muscleGrid, balanced && { opacity: 0.3 }]}>
           {MUSCLES.map(m => (
             <TouchableOpacity
               key={m.key}
               style={[
                 styles.muscleBtn,
                 muscles.includes(m.key) && styles.optionSelected,
-                !muscles.includes(m.key) && muscles.length >= 3 && styles.muscleBtnDisabled,
+                (!muscles.includes(m.key) && muscles.length >= 3) && styles.muscleBtnDisabled,
               ]}
-              onPress={() => toggleMuscle(m.key)}
+              onPress={() => { if (!balanced) toggleMuscle(m.key); }}
             >
               <Text style={[
                 styles.muscleText,
@@ -183,9 +206,11 @@ export default function OnboardingScreen({ onComplete }: { onComplete: () => voi
             </TouchableOpacity>
           ))}
         </View>
+
         <TouchableOpacity
-          style={styles.nextBtn}
-          onPress={() => setStep(4)}
+          style={[styles.nextBtn, (!balanced && muscles.length === 0) && styles.nextBtnDisabled]}
+          onPress={() => (balanced || muscles.length > 0) && setStep(4)}
+          disabled={!balanced && muscles.length === 0}
         >
           <Text style={styles.nextBtnText}>Next</Text>
         </TouchableOpacity>
@@ -196,51 +221,43 @@ export default function OnboardingScreen({ onComplete }: { onComplete: () => voi
     </SafeAreaView>
   );
 
-  // Step 4 — Recommendations
+  // Step 4 — Summary
   if (step === 4) {
-    const targets = goal ? VOLUME_TARGETS[goal] : {};
-    const allMuscles = Object.keys(targets) as Muscle[];
     return (
       <SafeAreaView style={styles.safe}>
         <ScrollView contentContainerStyle={styles.container}>
           <Text style={styles.stepLabel}>Step 4 of 4</Text>
-          <Text style={styles.question}>Here's your starting blueprint.</Text>
-          <Text style={styles.subtext}>
-            Based on your goal and {days} training days per week:
-          </Text>
+          <Text style={styles.question}>You're all set.</Text>
+          <Text style={styles.subtext}>Here's how SWOLE OS works.</Text>
+
+          <View style={styles.notesCard}>
+            <Text style={styles.noteText}>
+              After a few sessions, you'll start seeing exactly how much quality volume you're doing
+              per muscle group, whether or not you're demonstrating progressive overload, and
+              recommendations on how to attack future sessions and weeks.
+            </Text>
+          </View>
 
           <View style={styles.recommendCard}>
-            {allMuscles.map(m => {
-              const isPriority = muscles.includes(m);
-              return (
-                <View key={m} style={styles.recommendRow}>
-                  <View style={styles.recommendLeft}>
-                    <Text style={styles.recommendMuscle}>
-                      {m.charAt(0).toUpperCase() + m.slice(1)}
-                    </Text>
-                    {isPriority && (
-                      <View style={styles.priorityTag}>
-                        <Text style={styles.priorityTagText}>PRIORITY</Text>
-                      </View>
-                    )}
-                  </View>
-                  <Text style={styles.recommendTarget}>
-                    {targets[m]} sets/wk
-                  </Text>
-                </View>
-              );
-            })}
+            <View style={styles.recommendRow}>
+              <Text style={styles.recommendMuscle}>General volume guideline</Text>
+            </View>
+            <View style={[styles.recommendRow, { borderBottomWidth: 0 }]}>
+              <Text style={styles.noteText}>
+                Most muscle groups: <Text style={{ color: '#e8ff47', fontWeight: '700' }}>6–18 hard working sets/week</Text> depending on your training style, intensity, and recovery capacity. SWOLE OS will track this for you automatically.
+              </Text>
+            </View>
           </View>
 
           <View style={styles.notesCard}>
             <Text style={styles.noteText}>
-              Priority muscles should be trained 2–3x per week.
+              Priority muscles should be trained 2–3x per week when possible.
             </Text>
             <Text style={styles.noteText}>
-              Non-priority muscles: 1–2x per week is enough.
+              Non-priority muscles: 1–2x per week is plenty.
             </Text>
             <Text style={styles.noteText}>
-              These targets will update as SWOLE OS learns your training.
+              Every workout logged makes SWOLE OS smarter about your training.
             </Text>
           </View>
 
