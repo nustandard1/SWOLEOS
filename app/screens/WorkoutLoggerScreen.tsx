@@ -277,7 +277,7 @@ function ScaleRow({ count, value, onChange, lowLabel, highLabel, labels }) {
 const SORENESS_LABELS = ['NONE', 'MILD', 'MODERATE', 'HIGH', 'SEVERE'];
 const READINESS_LABELS = ['DRAINED', 'LOW', 'OK', 'GOOD', 'PRIMED'];
 
-function FinishOverlay({ visible, sessionName, volume, hardSets, onDone }) {
+function FinishOverlay({ visible, sessionName, volume, hardSets, onDone, analysis }) {
   const [rpe, setRpe] = useState(null);
   const [soreness, setSoreness] = useState(null);
   const [readiness, setReadiness] = useState(null);
@@ -307,6 +307,28 @@ function FinishOverlay({ visible, sessionName, volume, hardSets, onDone }) {
               <Text style={fo.statLbl}>WORKING SETS</Text>
             </View>
           </View>
+
+          {/* Quick session analysis */}
+          {analysis && analysis.exCount > 0 ? (
+            <View style={fo.analysis}>
+              {analysis.prCount > 0 ? (
+                <View style={fo.aRow}>
+                  <MaterialCommunityIcons name="trophy" size={15} color={colors.statusGood} />
+                  <Text style={[fo.aText, { color: colors.statusGood }]}>{analysis.prCount} new PR{analysis.prCount === 1 ? '' : 's'} this session</Text>
+                </View>
+              ) : null}
+              {analysis.topW > 0 ? (
+                <View style={fo.aRow}>
+                  <MaterialCommunityIcons name="arm-flex" size={15} color={colors.acc2} />
+                  <Text style={fo.aText}>Top set — {analysis.topW} × {analysis.topR}</Text>
+                </View>
+              ) : null}
+              <View style={fo.aRow}>
+                <MaterialCommunityIcons name="dumbbell" size={15} color={colors.muted} />
+                <Text style={fo.aText}>{analysis.exCount} exercise{analysis.exCount === 1 ? '' : 's'} · {analysis.muscles} muscle group{analysis.muscles === 1 ? '' : 's'} trained</Text>
+              </View>
+            </View>
+          ) : null}
 
           {/* Quick check-in — feeds recovery/readiness insight. Optional. */}
           <View style={fo.checkin}>
@@ -1226,7 +1248,26 @@ export default function WorkoutLoggerScreen() {
       return;
     }
     try { Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success); } catch (e) { /* ignore */ }
-    setFinishData({ name, volume: liveVolume, hardSets: liveHardSets, sessionId: session.id });
+    // Quick session analysis — PRs, top set, exercises + muscles trained.
+    let prCount = 0, topW = 0, topR = 0, exCount = 0;
+    const musclesHit = new Set();
+    for (const ex of exercises) {
+      const done = ex.sets.filter(s => s.done && s.type !== 'warmup' && +s.w > 0 && +s.r > 0);
+      if (!done.length) continue;
+      exCount++;
+      if (ex.exercise?.primary_muscle) musclesHit.add(ex.exercise.primary_muscle);
+      const lastBest = (ex.history?.sets || []).filter(x => (x.weight || 0) > 0 && x.reps > 0)
+        .reduce((m, x) => Math.max(m, (x.weight || 0) * (1 + x.reps / 30)), 0);
+      let exPr = false;
+      for (const s of done) {
+        const w = +s.w, r = +s.r;
+        if (lastBest > 0 && w * (1 + r / 30) > lastBest + 0.5) exPr = true;
+        if (w > topW) { topW = w; topR = r; }
+      }
+      if (exPr) prCount++;
+    }
+    setFinishData({ name, volume: liveVolume, hardSets: liveHardSets, sessionId: session.id,
+      analysis: { prCount, topW, topR, exCount, muscles: musclesHit.size } });
     setShowFinish(true);
   }
 
@@ -1776,6 +1817,7 @@ export default function WorkoutLoggerScreen() {
         sessionName={finishData?.name || sessionName}
         volume={finishData?.volume || liveVolume}
         hardSets={finishData?.hardSets || liveHardSets}
+        analysis={finishData?.analysis}
         onDone={async (checkin) => {
           const id = finishData?.sessionId;
           if (id && checkin && (checkin.session_rpe != null || checkin.soreness != null || checkin.readiness != null)) {
@@ -2124,6 +2166,9 @@ const fo = StyleSheet.create({
   doneBtnText: { fontFamily: fonts.display, fontSize: 18, color: colors.onAcc, textTransform: 'uppercase' },
 
   // Quick check-in
+  analysis: { width: '100%', gap: 8, marginBottom: space.md },
+  aRow: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  aText: { fontFamily: fonts.bodyMed, fontSize: 13, color: colors.text },
   checkin: { width: '100%', borderTopWidth: 1.5, borderTopColor: colors.line, paddingTop: space.md, marginTop: space.xs },
   checkinHead: { fontFamily: fonts.bodyBold, fontSize: 12, color: colors.text, textTransform: 'uppercase', letterSpacing: 1.5, textAlign: 'center' },
   checkinSub: { fontFamily: fonts.body, fontSize: 12, color: colors.muted, textAlign: 'center', marginTop: 3, marginBottom: space.md },
