@@ -60,7 +60,7 @@ export default function IntelligenceScreen() {
         <View style={s.empty}>
           <MaterialCommunityIcons name="chart-line-variant" size={28} color={colors.acc2} />
           <Text style={s.emptyTitle}>INTELLIGENCE WARMING UP</Text>
-          <Text style={s.emptyBody}>Log a few sessions and your Training Score, trend reads, and weekly directives appear here — and sharpen every time you train.</Text>
+          <Text style={s.emptyBody}>Log a few sessions and your Training Status, trend reads, and weekly directives appear here — and sharpen every time you train.</Text>
         </View>
       ) : (
         <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>

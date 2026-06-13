@@ -45,7 +45,7 @@ export default function TrainingScore({ score, trigger }) {
           <Ring value={score.overall} color={color} trigger={trigger} />
           <View style={s.ringCenter}>
             <CountUp value={score.overall} trigger={trigger} duration={1100} style={s.scoreNum} />
-            <Text style={s.scoreSub}>TRAINING SCORE</Text>
+            <Text style={s.scoreSub}>TRAINING STATUS</Text>
           </View>
         </View>
         <View style={s.labelRow}>
