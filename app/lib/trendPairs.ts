@@ -132,7 +132,10 @@ const fmtLb = (d) => `${d >= 0 ? '+' : ''}${d.toFixed(1)} LB`;
 const fmtPt = (d) => `${d >= 0 ? '+' : ''}${d.toFixed(1)} PT`;
 
 // ── the pure builder ─────────────────────────────────────────────────────────
-export function buildTrendViews({ sessions = [], body = null, phase = null }) {
+export function buildTrendViews({ sessions = [], body = null, phase = null, phaseChangedAt = null }) {
+  // Grace window: the first ~2 weeks after switching to a cut/bulk, lean-mass swings are
+  // mostly water & glycogen — don't read them as muscle gained/lost (spec, Mike).
+  const inGrace = phaseChangedAt && (Date.now() - new Date(phaseChangedAt).getTime()) <= 14 * DAY;
   const thisMonday = mondayOf(new Date());
   const labels = Array.from({ length: WEEKS }, (_, i) => {
     const ago = WEEKS - 1 - i;
@@ -207,6 +210,13 @@ export function buildTrendViews({ sessions = [], body = null, phase = null }) {
     else if (sDir === 'down' && lDir === 'down') perfV = { tone: 'flag', badge: 'LOSING GROUND', headline: 'Strength and size both slipping.', sub: 'Both trending down — check recovery and food first. If you’re cutting, the deficit is too aggressive.' };
     else if (sDir === 'down') perfV = { tone: 'flag', badge: 'CHECK FATIGUE', headline: 'Strength is slipping.', sub: 'Lean mass is holding but strength is falling — that pattern is usually fatigue or a recovery hole, not lost muscle. Look at sleep and RPE.' };
     else perfV = { tone: 'neutral', badge: 'HOLDING', headline: 'Holding pattern.', sub: 'Nothing moving much either way. Make sure progressive overload is actually happening — the engine sharpens as you log.' };
+    // Early-cut / early-bulk grace window — don't misread water/glycogen as muscle. Only
+    // override the ALARMING reads; a strength-corroborated verdict (sDir up) stands.
+    if (inGrace && isCut && lDir === 'down' && sDir !== 'up') {
+      perfV = { tone: 'neutral', badge: 'EARLY CUT', headline: 'It’s only week one.', sub: 'The first weeks of a cut, a lean-mass dip is mostly water and glycogen — not muscle. Don’t panic. Hold the line and reassess after about two weeks.' };
+    } else if (inGrace && isGain && lDir === 'up' && sDir !== 'up') {
+      perfV = { tone: 'mid', badge: 'EARLY BULK', headline: 'Lean’s up — give it a beat.', sub: 'Early in a bulk, some of that lean gain is water and glycogen. Real muscle confirms over the coming weeks — keep eating and training.' };
+    }
   } else {
     // anyLean = connected but not enough weeks yet; !anyLean = nothing synced.
     const leanNote = anyLean
@@ -371,7 +381,7 @@ export async function getTrendViews(userId) {
       .eq('user_id', userId)
       .gte('performed_at', since)
       .order('performed_at', { ascending: true }),
-    supabase.from('users').select('current_phase').eq('id', userId).maybeSingle(),
+    supabase.from('users').select('current_phase, phase_changed_at').eq('id', userId).maybeSingle(),
     supabase.auth.getUser(),
   ]);
   const body = await getMergedBody(userId, await accountCreatedMs());
@@ -379,6 +389,7 @@ export async function getTrendViews(userId) {
     sessions: sessRes.data || [],
     body,
     phase: userRes.data?.current_phase || null,
+    phaseChangedAt: userRes.data?.phase_changed_at || null,
   });
 }
 
@@ -679,17 +690,18 @@ export async function getIntelligence(userId) {
       .eq('user_id', userId)
       .gte('performed_at', since)
       .order('performed_at', { ascending: true }),
-    supabase.from('users').select('current_phase').eq('id', userId).maybeSingle(),
+    supabase.from('users').select('current_phase, phase_changed_at').eq('id', userId).maybeSingle(),
     // limit(1) not maybeSingle — multiple active templates (from testing) would otherwise throw.
     supabase.from('workout_templates').select('template_sessions(id)').eq('user_id', userId).eq('is_active', true).order('created_at', { ascending: false }).limit(1),
   ]);
   const sessions = sessRes.data || [];
   const phase = userRes.data?.current_phase || null;
+  const phaseChangedAt = userRes.data?.phase_changed_at || null;
   const plannedPerWeek = (tmplRes.data?.[0]?.template_sessions || []).length;
 
   const body = await getMergedBody(userId, await accountCreatedMs());
 
-  const { views } = buildTrendViews({ sessions, body, phase });
+  const { views } = buildTrendViews({ sessions, body, phase, phaseChangedAt });
   const score = buildScore({ sessions, plannedPerWeek, phase });
   const doThis = buildDirectives({ views, score, sessions, phase });
   const insights = buildInsights({ sessions });

@@ -233,7 +233,9 @@ export default function ProfileScreen() {
     setProfile(p => ({ ...p, current_phase: k }));
     setGoalLocked(true); // re-lock after choosing so it can't drift by accident
     const { data: { user } } = await supabase.auth.getUser();
-    if (user) await supabase.from('users').update({ current_phase: k }).eq('id', user.id);
+    // Stamp the change date — the body-comp engine uses it for the early-cut/bulk grace
+    // window (first ~2 weeks of LBM swing is mostly water/glycogen, not muscle).
+    if (user) await supabase.from('users').update({ current_phase: k, phase_changed_at: new Date().toISOString() }).eq('id', user.id);
   }
 
   function openMuscleEditor() {
