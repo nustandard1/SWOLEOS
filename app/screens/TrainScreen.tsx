@@ -1,5 +1,6 @@
 // @ts-nocheck
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
+import { useScreenCache } from '../lib/useScreenCache';
 import {
   View, Text, StyleSheet, SafeAreaView, ScrollView,
   TouchableOpacity, ActivityIndicator, Alert, Modal,
@@ -17,10 +18,17 @@ function TemplatesPanel({ navigation }) {
   const [loading, setLoading] = useState(true);
   const loadedOnce = useRef(false); // spinner only on first load; refresh quietly after
 
+  // Stale-while-revalidate — show last templates instantly on open.
+  const { applied: cacheApplied, persist } = useScreenCache('train', (c) => {
+    if (loadedOnce.current) return;
+    if (c.templates) { setTemplates(c.templates); setLoading(false); }
+  });
+  useEffect(() => { if (!loading) persist({ templates }); }, [loading, templates]);
+
   useFocusEffect(useCallback(() => { loadTemplates(); }, []));
 
   async function loadTemplates() {
-    if (!loadedOnce.current) setLoading(true);
+    if (!loadedOnce.current && !cacheApplied.current) setLoading(true);
     loadedOnce.current = true;
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setLoading(false); return; }

@@ -1,5 +1,6 @@
 // @ts-nocheck
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
+import { useScreenCache } from '../lib/useScreenCache';
 import {
   View, Text, StyleSheet, SafeAreaView, FlatList,
   TouchableOpacity, ActivityIndicator, Modal, ScrollView, TextInput,
@@ -90,10 +91,24 @@ export default function HistoryScreen() {
   const [userId, setUserId]               = useState(null);
   const loadedOnce = useRef(false); // spinner only on first load; refresh quietly after
 
+  // Stale-while-revalidate — show last-known data instantly on open, refresh quietly.
+  const { applied: cacheApplied, persist } = useScreenCache('history', (c) => {
+    if (loadedOnce.current) return;
+    if (c.sessions) setSessions(c.sessions);
+    if (c.records) setRecords(c.records);
+    if (c.recStats) setRecStats(c.recStats);
+    if (c.strength) setStrength(c.strength);
+    setLoading(false);
+  });
+  useEffect(() => {
+    if (loading) return;
+    persist({ sessions, records, recStats, strength });
+  }, [loading, sessions, records, recStats, strength]);
+
   useFocusEffect(useCallback(() => { loadAll(); }, []));
 
   async function loadAll() {
-    if (!loadedOnce.current) setLoading(true);
+    if (!loadedOnce.current && !cacheApplied.current) setLoading(true);
     loadedOnce.current = true;
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setLoading(false); return; }

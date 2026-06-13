@@ -1,6 +1,7 @@
 // @ts-nocheck
 import React, { useState, useCallback, useEffect } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useScreenCache } from '../lib/useScreenCache';
 import {
   View, Text, StyleSheet, SafeAreaView, ScrollView,
   TouchableOpacity, Alert, Modal, TextInput,
@@ -102,6 +103,23 @@ export default function ProfileScreen() {
   const [draftDays, setDraftDays] = useState(null);
   const [draftExp, setDraftExp] = useState(null);
   const [draftReps, setDraftReps] = useState(null);
+
+  // Stale-while-revalidate — paint the last profile snapshot instantly on open.
+  const { persist } = useScreenCache('profile', (c) => {
+    if (profile) return;
+    if (c.profile) setProfile(c.profile);
+    if (c.lifetimeVol != null) setLifetimeVol(c.lifetimeVol);
+    if ('program' in c) setProgram(c.program);
+    if (c.streak != null) setStreak(c.streak);
+    if (c.weeks) setWeeks(c.weeks);
+    if (c.leanWeeks) setLeanWeeks(c.leanWeeks);
+    if (c.leanHasData != null) setLeanHasData(c.leanHasData);
+    if (c.hasSessions != null) setHasSessions(c.hasSessions);
+  });
+  useEffect(() => {
+    if (!profile) return;
+    persist({ profile, lifetimeVol, program, streak, weeks, leanWeeks, leanHasData, hasSessions });
+  }, [profile, lifetimeVol, program, streak, weeks, leanWeeks, leanHasData, hasSessions]);
 
   useFocusEffect(useCallback(() => { loadProfile(); }, []));
 

@@ -1,5 +1,6 @@
 // @ts-nocheck
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
+import { useScreenCache } from '../lib/useScreenCache';
 import {
   View, Text, StyleSheet, SafeAreaView, ScrollView,
   TouchableOpacity, ActivityIndicator,
@@ -30,10 +31,17 @@ export default function IntelligenceScreen() {
   const [focusKey, setFocusKey] = useState(0);
   const loadedOnce = useRef(false);
 
+  // Stale-while-revalidate — render the last intel snapshot instantly on open.
+  const { applied: cacheApplied, persist } = useScreenCache('intelligence', (c) => {
+    if (loadedOnce.current) return;
+    if (c.data) { setData(c.data); setLoading(false); }
+  });
+  useEffect(() => { if (!loading && data) persist({ data }); }, [loading, data]);
+
   useFocusEffect(useCallback(() => { load(); setFocusKey(k => k + 1); }, []));
 
   async function load() {
-    if (!loadedOnce.current) setLoading(true);
+    if (!loadedOnce.current && !cacheApplied.current) setLoading(true);
     loadedOnce.current = true;
     try {
       const { data: { user } } = await supabase.auth.getUser();
