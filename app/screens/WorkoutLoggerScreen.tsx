@@ -12,6 +12,7 @@ import Reanimated, {
 import { Gesture, GestureDetector, GestureHandlerRootView, ScrollView as GHScrollView } from 'react-native-gesture-handler';
 import ReanimatedSwipeable from 'react-native-gesture-handler/ReanimatedSwipeable';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import YoutubePlayer from 'react-native-youtube-iframe';
 import { BlurView } from 'expo-blur';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -501,32 +502,50 @@ function RestDivider({ rest, onPreset, onSkip }) {
   );
 }
 
-// ─── Exercise demo video ────────────────────────────────────────────────────────
-// EXPERIMENT (2026-06-12): a YouTube form-demo on the exercise card. OTA-safe — just a
-// thumbnail (core Image) + tap → opens YouTube (core Linking). Inline in-app playback
-// would need react-native-webview = a rebuild (not yet in the binary).
-// PLACEHOLDER_DEMO renders on every exercise so the layout is visible before real
-// per-exercise `exercises.video_url`s are populated — swap/remove once wired to data.
+// ─── Exercise demo video (Hevy-style) ──────────────────────────────────────────
+// Small thumbnail tucked in the card header → tap → an in-app inline player (modal
+// with a Back button). Uses react-native-webview via react-native-youtube-iframe, so
+// it ships in a BUILD (not an OTA). PLACEHOLDER_DEMO renders on every card so the
+// flow is visible before real per-exercise `exercises.video_url`s are populated.
 const PLACEHOLDER_DEMO = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
-function ytThumb(url) {
+function ytVideoId(url) {
   if (!url) return null;
   const m = url.match(/(?:youtu\.be\/|youtube\.com\/(?:watch\?v=|embed\/|shorts\/))([\w-]{11})/);
-  return m ? `https://img.youtube.com/vi/${m[1]}/hqdefault.jpg` : null;
+  return m ? m[1] : null;
 }
-function ExerciseVideo({ url }) {
-  const thumb = ytThumb(url);
-  if (!thumb) return null;
+// Compact play-thumbnail for the card header (Hevy puts it upper-left of the name).
+function VideoThumb({ url, onPress }) {
+  const id = ytVideoId(url);
+  if (!id) return null;
   return (
-    <TouchableOpacity style={s.videoWrap} activeOpacity={0.85} onPress={() => Linking.openURL(url).catch(() => {})}>
-      <ImageBackground source={{ uri: thumb }} style={s.videoThumb} resizeMode="cover">
-        <View style={s.videoOverlay} />
-        <View style={s.videoPlay}><MaterialCommunityIcons name="play" size={26} color="#fff" style={{ marginLeft: 3 }} /></View>
-        <View style={s.videoTag}>
-          <MaterialCommunityIcons name="youtube" size={13} color="#fff" />
-          <Text style={s.videoTagText}>FORM DEMO</Text>
-        </View>
+    <TouchableOpacity style={s.vThumb} onPress={onPress} activeOpacity={0.85} hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}>
+      <ImageBackground source={{ uri: `https://img.youtube.com/vi/${id}/mqdefault.jpg` }} style={s.vThumbImg} resizeMode="cover">
+        <View style={s.vThumbOverlay} />
+        <MaterialCommunityIcons name="play" size={15} color="#fff" style={{ marginLeft: 1 }} />
       </ImageBackground>
     </TouchableOpacity>
+  );
+}
+// Full inline player — opens bigger, Back returns to the session (never leaves the app).
+function VideoPlayerModal({ url, title, onClose }) {
+  const id = ytVideoId(url);
+  return (
+    <Modal visible={!!url} animationType="slide" onRequestClose={onClose} transparent={false}>
+      <SafeAreaView style={s.vModalSafe}>
+        <View style={s.vModalBar}>
+          <TouchableOpacity style={s.vBack} onPress={onClose} hitSlop={{ top: 10, bottom: 10, left: 6, right: 14 }}>
+            <MaterialCommunityIcons name="chevron-left" size={26} color={colors.text} />
+            <Text style={s.vBackText}>BACK</Text>
+          </TouchableOpacity>
+          <Text style={s.vModalTitle} numberOfLines={1}>{(title || '').toUpperCase()}</Text>
+          <View style={{ width: 58 }} />
+        </View>
+        <View style={s.vPlayerWrap}>
+          {id ? <YoutubePlayer height={230} play videoId={id} webViewProps={{ allowsInlineMediaPlayback: true }} /> : null}
+        </View>
+        <Text style={s.vModalHint}>Tap Back to return to your session.</Text>
+      </SafeAreaView>
+    </Modal>
   );
 }
 
@@ -566,6 +585,7 @@ export default function WorkoutLoggerScreen() {
     return () => clearInterval(id);
   }, []);
   const [showRpeHelp, setShowRpeHelp] = useState(false);
+  const [videoModal, setVideoModal]   = useState(null); // { url, name } — the inline demo player
   const [noteTarget, setNoteTarget]   = useState(null); // {type:'session'} | {type:'ex', exIdx}
   const [noteDraft, setNoteDraft]     = useState('');
 
@@ -1335,6 +1355,11 @@ export default function WorkoutLoggerScreen() {
             summary={<SummaryRow setCount={doneSets.length} topW={topW} topR={topR} isPr={collapsedPr} />}
             header={(
             <View style={s.exCardHeader}>
+              {/* Demo video — small thumbnail upper-left; tap opens the inline player */}
+              <VideoThumb
+                url={item.exercise?.video_url || PLACEHOLDER_DEMO}
+                onPress={() => setVideoModal({ url: item.exercise?.video_url || PLACEHOLDER_DEMO, name: item.exercise.name })}
+              />
               <View style={{ flex: 1 }}>
                 <Text style={s.exName} numberOfLines={2}>{item.exercise.name.toUpperCase()}</Text>
               </View>
@@ -1351,10 +1376,6 @@ export default function WorkoutLoggerScreen() {
             </View>
             )}
           >
-            {/* Form-demo video (experiment) — uses the exercise's video_url, falls back to
-                a placeholder so the layout shows before real URLs are populated. */}
-            <ExerciseVideo url={item.exercise?.video_url || PLACEHOLDER_DEMO} />
-
             {/* Note — only when set (add/edit via the ✎ in the header) */}
             {item.note ? (
               <TouchableOpacity style={s.exNoteLine} onPress={() => openNote({ type: 'ex', exIdx }, item.note)}>
@@ -1595,6 +1616,9 @@ export default function WorkoutLoggerScreen() {
       {/* RPE explainer */}
       <RpeHelpSheet visible={showRpeHelp} onClose={() => setShowRpeHelp(false)} />
 
+      {/* Inline demo-video player */}
+      <VideoPlayerModal url={videoModal?.url} title={videoModal?.name} onClose={() => setVideoModal(null)} />
+
       {/* Exercise ⋯ menu */}
       <ExerciseOptionsSheet
         visible={exMenuTarget != null}
@@ -1820,13 +1844,17 @@ const s = StyleSheet.create({
   targetKicker: { fontFamily: fonts.bodySemi, fontSize: 9, color: colors.muted, textTransform: 'uppercase', letterSpacing: 1.5, marginBottom: 3 },
   targetText: { fontFamily: fonts.bodySemi, fontSize: 12, color: colors.acc2, letterSpacing: 0.2, lineHeight: 18 },
 
-  // Exercise demo video (experiment) — thumbnail banner with a play button
-  videoWrap: { marginHorizontal: space.md, marginTop: 11, borderRadius: 10, overflow: 'hidden', borderWidth: 1, borderColor: colors.line2 },
-  videoThumb: { height: 150, alignItems: 'center', justifyContent: 'center' },
-  videoOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.30)' },
-  videoPlay: { width: 54, height: 54, borderRadius: 27, backgroundColor: 'rgba(255,90,30,0.92)', alignItems: 'center', justifyContent: 'center', borderWidth: 1.5, borderColor: 'rgba(255,255,255,0.85)' },
-  videoTag: { position: 'absolute', left: 10, bottom: 10, flexDirection: 'row', alignItems: 'center', gap: 5, backgroundColor: 'rgba(0,0,0,0.6)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
-  videoTagText: { fontFamily: fonts.bodyBold, fontSize: 10, color: '#fff', letterSpacing: 1.2 },
+  // Exercise demo video — compact header thumbnail + full inline player modal
+  vThumb: { width: 46, height: 46, borderRadius: 8, overflow: 'hidden', borderWidth: 1, borderColor: colors.line2, marginRight: 10 },
+  vThumbImg: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' },
+  vThumbOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.32)' },
+  vModalSafe: { flex: 1, backgroundColor: colors.bg },
+  vModalBar: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: space.sm, paddingVertical: 10, borderBottomWidth: 1.5, borderBottomColor: colors.line },
+  vBack: { flexDirection: 'row', alignItems: 'center', width: 58 },
+  vBackText: { fontFamily: fonts.bodySemi, fontSize: 13, color: colors.text, textTransform: 'uppercase', letterSpacing: 1 },
+  vModalTitle: { flex: 1, textAlign: 'center', fontFamily: fonts.display, fontSize: 15, color: colors.text, textTransform: 'uppercase' },
+  vPlayerWrap: { marginTop: space.lg, backgroundColor: '#000' },
+  vModalHint: { textAlign: 'center', fontFamily: fonts.body, fontSize: 12, color: colors.dim, marginTop: space.lg },
 
   // Compact intelligence strip (LAST + TARGET merged) + inline note line
   exNoteLine: { paddingHorizontal: space.md, paddingVertical: 6, borderTopWidth: 1.5, borderTopColor: colors.line },
