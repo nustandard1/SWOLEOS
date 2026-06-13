@@ -136,12 +136,20 @@ function increment(cls: ReturnType<typeof classify>) {
   return 5;                          // upper-body compound
 }
 const round5 = (n: number) => Math.round(n / 5) * 5;
-// RPE-adjusted Epley: feed "effective reps" = reps + RIR (RIR ≈ 10 − RPE, capped at 4)
-// so a set left with reps in reserve reflects more strength than its raw reps imply.
-// No RPE → plain Epley. Keeps "same weight & reps but easier" reading as a strength gain.
+// Estimated 1RM (spec §4.1). RPE-adjusted: feed "effective reps" n = reps + RIR
+// (RIR ≈ 10 − RPE, capped at 4) so reps-in-reserve count as strength. We AVERAGE Epley
+// and Brzycki to cancel single-formula bias — Epley over-reads at higher reps, Brzycki
+// under-reads; the mean is tighter. Both formulas diverge badly past ~10 effective reps
+// (high-rep sets contaminate a strength estimate with endurance) — the confidence layer
+// (§10, lands with the structured output) down-weights e1RM-driven calls there.
 const e1rm = (s: SetData) => {
+  const w = s.weight || 0;
+  if (w <= 0 || (s.reps || 0) <= 0) return 0;
   const rir = s.rpe == null ? 0 : Math.max(0, Math.min(4, 10 - s.rpe));
-  return (s.weight || 0) * (1 + (s.reps + rir) / 30);
+  const n = s.reps + rir; // effective reps
+  const epley = w * (1 + n / 30);
+  const brzycki = n < 37 ? (w * 36) / (37 - n) : epley; // guard the n→37 asymptote
+  return (epley + brzycki) / 2;
 };
 
 function bestE1rm(session: ExerciseHistory): number {

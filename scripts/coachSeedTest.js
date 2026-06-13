@@ -9,8 +9,13 @@
 const NOISE_BAND = 0.04; // ±4% — e1RM measurement-noise floor (spec §4.4)
 
 function e1rm(s) {
+  const w = s.weight || 0;
+  if (w <= 0 || (s.reps || 0) <= 0) return 0;
   const rir = s.rpe == null ? 0 : Math.max(0, Math.min(4, 10 - s.rpe));
-  return (s.weight || 0) * (1 + (s.reps + rir) / 30);
+  const n = s.reps + rir;
+  const epley = w * (1 + n / 30);
+  const brzycki = n < 37 ? (w * 36) / (37 - n) : epley;
+  return (epley + brzycki) / 2;
 }
 function bestE1rm(sets) {
   const v = (sets || []).filter(s => (s.weight || 0) > 0 && s.reps > 0).map(e1rm);
