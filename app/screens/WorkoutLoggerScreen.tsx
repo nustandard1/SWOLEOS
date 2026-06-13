@@ -132,22 +132,18 @@ function SwipeSheet({ visible, onClose, keyboardAvoid, children }) {
 }
 
 // ─── Set Options Sheet ────────────────────────────────────────────────────────
-function SetOptionsSheet({ visible, set, onWarmup, onDuplicate, onAddCluster, onCancel }) {
-  const isWarmup = set?.type === 'warmup';
+// Tapping the set number opens this — its sole job now is clusters (warmup labeling and
+// "duplicate set" were removed: log working sets, and Add Set already clones the last one).
+function SetOptionsSheet({ visible, set, onAddCluster, onCancel }) {
   const hasClusters = (set?.clusters?.length || 0) > 0;
   return (
     <SwipeSheet visible={visible} onClose={onCancel}>
       <View style={sh.sheet}>
         <View style={sh.handle} />
-        <Text style={sh.title}>SET OPTIONS</Text>
-        <TouchableOpacity style={sh.row} onPress={onDuplicate}>
-          <Text style={sh.rowText}>⊕  Duplicate set</Text>
+        <Text style={sh.title}>CLUSTERS / MYO-REPS</Text>
+        <TouchableOpacity style={sh.row} onPress={onAddCluster}>
+          <Text style={sh.rowText}>✛  Add cluster{hasClusters ? ' (another)' : ' set'}</Text>
         </TouchableOpacity>
-        {!isWarmup && (
-          <TouchableOpacity style={sh.row} onPress={onAddCluster}>
-            <Text style={sh.rowText}>✛  Add cluster{hasClusters ? ' (another)' : ' / myo-rep'}</Text>
-          </TouchableOpacity>
-        )}
         <TouchableOpacity style={sh.cancelBtn} onPress={onCancel}>
           <Text style={sh.cancelText}>CANCEL</Text>
         </TouchableOpacity>
@@ -1056,30 +1052,24 @@ export default function WorkoutLoggerScreen() {
       }),
     }));
   }
-  // Clear the whole cluster block off a set (the obvious "delete" — beats stepping each to 0).
+  // Remove ONE cluster set (added one too many) — distinct from clearing the whole block.
+  function removeCluster(exIdx, setIdx, ci) {
+    setExercises(prev => prev.map((ex, i) => i !== exIdx ? ex : {
+      ...ex,
+      sets: ex.sets.map((st, j) => {
+        if (j !== setIdx) return st;
+        const clusters = [...(st.clusters || [])];
+        clusters.splice(ci, 1);
+        return { ...st, clusters };
+      }),
+    }));
+  }
+  // Clear the whole cluster block off a set (the obvious "delete all").
   function removeClusters(exIdx, setIdx) {
     setExercises(prev => prev.map((ex, i) => i !== exIdx ? ex : {
       ...ex,
       sets: ex.sets.map((st, j) => j !== setIdx ? st : { ...st, clusters: [] }),
     }));
-  }
-
-  function markWarmup(exIdx, setIdx) {
-    setExercises(prev => prev.map((ex, i) => i !== exIdx ? ex : {
-      ...ex,
-      sets: ex.sets.map((s, j) => j !== setIdx ? s : { ...s, type: s.type === 'warmup' ? 'normal' : 'warmup' }),
-    }));
-    setMenuTarget(null);
-  }
-
-  function duplicateSet(exIdx, setIdx) {
-    setExercises(prev => prev.map((ex, i) => {
-      if (i !== exIdx) return ex;
-      const copy = { ...ex.sets[setIdx], done: false };
-      const sets = [...ex.sets.slice(0, setIdx + 1), copy, ...ex.sets.slice(setIdx + 1)];
-      return { ...ex, sets };
-    }));
-    setMenuTarget(null);
   }
 
   function deleteSet(exIdx, setIdx) {
@@ -1434,11 +1424,11 @@ export default function WorkoutLoggerScreen() {
                         <Text style={s.coachWhy}><Text style={s.coachWhyLabel}>Why — </Text>{g.coachNote}</Text>
                       ) : null}
                       {g.dataUsed?.length ? (
-                        <View style={s.coachDataRow}>
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={s.coachDataRow} contentContainerStyle={{ gap: 5, alignItems: 'center' }}>
                           {g.dataUsed.map((d, di) => (
-                            <View key={di} style={s.coachDataChip}><Text style={s.coachDataChipText}>{d}</Text></View>
+                            <View key={di} style={s.coachDataChip}><Text style={s.coachDataChipText} numberOfLines={1}>{d}</Text></View>
                           ))}
-                        </View>
+                        </ScrollView>
                       ) : null}
                       <Text style={s.coachConf}>CONFIDENCE: <Text style={{ color: confColor }}>{(g.confidence || 'low').toUpperCase()}</Text></Text>
                     </View>
@@ -1561,8 +1551,11 @@ export default function WorkoutLoggerScreen() {
                           <Text style={s.clusterStep}>−</Text>
                         </TouchableOpacity>
                         <Text style={s.clusterVal}>{cr}</Text>
-                        <TouchableOpacity onPress={() => stepCluster(exIdx, setIdx, ci, 1)} hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}>
+                        <TouchableOpacity onPress={() => stepCluster(exIdx, setIdx, ci, 1)} hitSlop={{ top: 8, bottom: 8, left: 4, right: 6 }}>
                           <Text style={s.clusterStep}>+</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity onPress={() => removeCluster(exIdx, setIdx, ci)} hitSlop={{ top: 8, bottom: 8, left: 4, right: 8 }}>
+                          <Text style={s.clusterChipX}>×</Text>
                         </TouchableOpacity>
                       </View>
                     ))}
@@ -1663,8 +1656,6 @@ export default function WorkoutLoggerScreen() {
       <SetOptionsSheet
         visible={!!menuTarget}
         set={menuTarget ? exercises[menuTarget.exIdx]?.sets[menuTarget.setIdx] : null}
-        onWarmup={() => markWarmup(menuTarget.exIdx, menuTarget.setIdx)}
-        onDuplicate={() => duplicateSet(menuTarget.exIdx, menuTarget.setIdx)}
         onAddCluster={() => addCluster(menuTarget.exIdx, menuTarget.setIdx)}
         onCancel={() => setMenuTarget(null)}
       />
@@ -1913,7 +1904,7 @@ const s = StyleSheet.create({
   coachExp: { paddingHorizontal: space.md, paddingTop: 10, paddingBottom: 12, borderTopWidth: 1, borderTopColor: '#232323' },
   coachWhy: { fontFamily: fonts.body, fontSize: 12.5, color: '#D9D4CC', lineHeight: 18 },
   coachWhyLabel: { fontFamily: fonts.bodySemi, color: colors.muted },
-  coachDataRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 10 },
+  coachDataRow: { marginTop: 10, flexGrow: 0 },
   coachDataChip: { borderWidth: 1, borderColor: colors.line2, paddingHorizontal: 7, paddingVertical: 3 },
   coachDataChipText: { fontFamily: fonts.bodySemi, fontSize: 9.5, color: colors.muted, letterSpacing: 0.5 },
   coachConf: { fontFamily: fonts.bodySemi, fontSize: 10, color: colors.dim, letterSpacing: 1, marginTop: 9 },
@@ -1975,7 +1966,8 @@ const s = StyleSheet.create({
   prToastDetail: { fontFamily: fonts.bodyBold, fontSize: 14, color: colors.statusGood, fontVariant: ['tabular-nums'] },
   clusterRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6, paddingLeft: 52, paddingRight: space.sm, paddingBottom: 8, marginTop: -2 },
   clusterLabel: { fontFamily: fonts.bodySemi, fontSize: 9, color: colors.acc2, letterSpacing: 1.2, marginRight: 2 },
-  clusterChip: { flexDirection: 'row', alignItems: 'center', borderWidth: 1.5, borderColor: colors.line2, backgroundColor: colors.surf2, paddingHorizontal: 8, paddingVertical: 3, gap: 8 },
+  clusterChip: { flexDirection: 'row', alignItems: 'center', borderWidth: 1.5, borderColor: colors.line2, backgroundColor: colors.surf2, paddingHorizontal: 8, paddingVertical: 3, gap: 7 },
+  clusterChipX: { fontFamily: fonts.bodySemi, fontSize: 13, color: colors.muted, marginLeft: 1 },
   clusterStep: { fontFamily: fonts.bodyBold, fontSize: 16, color: colors.acc, lineHeight: 18, width: 14, textAlign: 'center' },
   clusterVal: { fontFamily: fonts.bodyBold, fontSize: 14, color: colors.text, minWidth: 14, textAlign: 'center' },
   clusterAdd: { borderWidth: 1.5, borderColor: colors.acc, borderStyle: 'dashed', paddingHorizontal: 8, paddingVertical: 4 },

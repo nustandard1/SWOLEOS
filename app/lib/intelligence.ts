@@ -616,12 +616,13 @@ export function buildProgressionGuidance(
   const trendWord = trend === 'progressing' ? 'Est. 1RM climbing'
     : trend === 'slipping' ? 'Est. 1RM sliding'
     : trend === 'flat' ? 'Est. 1RM flat' : 'Trend still forming';
+  const nExp = Math.min(sessions.length, 4);
   const dataUsed = [
-    `Last ${Math.min(sessions.length, 4)} exposure${sessions.length === 1 ? '' : 's'}`,
-    hasRpe ? `Avg RPE ${avgRpe.toFixed(1)}` : 'No RPE logged',
+    `${nExp} session${nExp === 1 ? '' : 's'}`,
+    hasRpe ? `RPE ${avgRpe.toFixed(1)}` : 'No RPE',
     trendWord,
   ];
-  if (rhrElevated && rhr) dataUsed.push(`RHR +${rhr.delta} bpm`);
+  if (rhrElevated && rhr) dataUsed.push(`RHR +${rhr.delta}`);
   if (sleepDeficit && sleep) dataUsed.push(`Sleep ${sleep.hrs}h`);
 
   return {
