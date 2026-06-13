@@ -8,7 +8,7 @@ import Svg, { Polyline, Line, Circle, Text as SvgText } from 'react-native-svg';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
-import { getMergedBody } from '../lib/trendPairs';
+import { getMergedBody, accountCreatedMs } from '../lib/trendPairs';
 import { colors, fonts, space } from '../theme/forge';
 
 function relativeTime(dateStr) {
@@ -239,7 +239,15 @@ export default function HistoryScreen() {
     const logged = slots.filter(s => s.best).length;
     const complete = logged === slots.length; // total only when all 3 lifts are in
     const score = complete ? Math.round(slots.reduce((sum, s) => sum + (s.best ? s.best.e : 0), 0)) : 0;
-    setStrength({ slots, score, logged, total: slots.length, complete });
+    // Relative strength = total ÷ bodyweight (combat/tactical/relative-strength signal).
+    // Only when the total is complete AND we know their bodyweight.
+    let bodyweight = 0;
+    try {
+      const { weight } = await getMergedBody(uid, await accountCreatedMs());
+      if (weight?.length) bodyweight = [...weight].sort((a, b) => b.date - a.date)[0].value;
+    } catch (e) { /* no body data — relative strength stays hidden */ }
+    const relative = (complete && bodyweight > 0) ? score / bodyweight : null;
+    setStrength({ slots, score, logged, total: slots.length, complete, relative });
   }
 
   async function openDetail(session) {
@@ -430,6 +438,9 @@ export default function HistoryScreen() {
                   <>
                     <Text style={s.strScoreNum}>{strength.score.toLocaleString()}</Text>
                     <Text style={s.strScoreLbl}>POWERLIFTING TOTAL · EST 1RM</Text>
+                    {strength.relative ? (
+                      <Text style={s.strRel}>{strength.relative.toFixed(2)}× BODYWEIGHT</Text>
+                    ) : null}
                   </>
                 ) : (
                   <>
@@ -785,6 +796,7 @@ const s = StyleSheet.create({
   strScore: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1.5, borderColor: colors.accDim, backgroundColor: colors.accSurf, borderRadius: 14, paddingVertical: 13, paddingHorizontal: 16, marginBottom: 8 },
   strScoreNum: { fontFamily: fonts.display, fontSize: 34, color: colors.acc, lineHeight: 42, paddingTop: 4 },
   strScoreLbl: { fontFamily: fonts.bodySemi, fontSize: 8.5, color: colors.muted, letterSpacing: 1, marginTop: 2, textTransform: 'uppercase' },
+  strRel: { fontFamily: fonts.bodyBold, fontSize: 11, color: colors.acc2, letterSpacing: 0.5, marginTop: 5 },
   strScoreCount: { alignItems: 'center', borderLeftWidth: 1.5, borderLeftColor: colors.accDim, paddingLeft: 16 },
   strScoreCountNum: { fontFamily: fonts.display, fontSize: 20, color: colors.text },
   strScoreCountLbl: { fontFamily: fonts.bodySemi, fontSize: 8, color: colors.muted, letterSpacing: 1, marginTop: 2 },
