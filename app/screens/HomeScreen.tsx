@@ -81,6 +81,7 @@ export default function HomeScreen() {
   const [healthConnected, setHealthConnected] = useState(true); // assume yes until proven otherwise (don't flash the tip)
   const [showRpe, setShowRpe] = useState(false);      // RPE explainer modal (from a first-run tip)
   const [showHealth, setShowHealth] = useState(false); // Apple Health connect modal (from a first-run tip)
+  const [showHowto, setShowHowto] = useState(false);   // "get the most out of SWOLE/OS" modal
 
   // Every calendar tap opens an adaptive day sheet (see DaySheet).
   function onDayPress(dateKey, info) { setDaySheet({ dateKey, info }); }
@@ -92,6 +93,7 @@ export default function HomeScreen() {
   function handleTip(action) {
     if (action === 'rpe') setShowRpe(true);
     else if (action === 'health') setShowHealth(true);
+    else if (action === 'howto') setShowHowto(true);
   }
   async function connectAppleHealth() {
     setShowHealth(false);
@@ -456,6 +458,34 @@ export default function HomeScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* "Get the most out of SWOLE/OS" — from the first-run how-to tip */}
+      <Modal visible={showHowto} transparent animationType="fade" onRequestClose={() => setShowHowto(false)}>
+        <View style={s.modalBackdrop}>
+          <View style={s.modalCard}>
+            <Text style={s.modalTitle}>GET THE MOST OUT OF{'\n'}SWOLE/OS</Text>
+            {[
+              { i: 'calendar-check', t: 'Log consistently', d: 'The more you log, the sharper your coaching gets.' },
+              { i: 'heart-pulse', t: 'Sync your devices', d: 'Connect a scale / watch to Apple Health if you have them.' },
+              { i: 'gauge', t: 'Log RPE honestly', d: 'It drives every progression call — accuracy pays you back.' },
+              { i: 'clipboard-text', t: 'Use a template or program', d: "No plan at the gym? Pick one in the Train tab." },
+              { i: 'target', t: 'Set your goal', d: 'Tell us your phase in Profile so intel aims the right way.' },
+              { i: 'comment-question', t: 'Answer the 3 post-session questions', d: 'Five seconds that make recovery reads real.' },
+            ].map((h, i) => (
+              <View key={i} style={s.howRow}>
+                <MaterialCommunityIcons name={h.i} size={18} color={colors.acc} style={{ marginTop: 1 }} />
+                <View style={{ flex: 1 }}>
+                  <Text style={s.howT}>{h.t}</Text>
+                  <Text style={s.howD}>{h.d}</Text>
+                </View>
+              </View>
+            ))}
+            <TouchableOpacity style={s.modalBtn} onPress={() => setShowHowto(false)}>
+              <Text style={s.modalBtnText}>LET'S GO</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -537,6 +567,9 @@ const s = StyleSheet.create({
   modalBtnText: { fontFamily: fonts.display, fontSize: 15, color: colors.onAcc, textTransform: 'uppercase', letterSpacing: 0.5 },
   modalCancel: { paddingVertical: 13, alignItems: 'center' },
   modalCancelText: { fontFamily: fonts.bodySemi, fontSize: 12, color: colors.muted, textTransform: 'uppercase', letterSpacing: 1 },
+  howRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 11, marginTop: 13 },
+  howT: { fontFamily: fonts.bodySemi, fontSize: 13.5, color: colors.text },
+  howD: { fontFamily: fonts.body, fontSize: 12, color: colors.muted, lineHeight: 16, marginTop: 1 },
 
   // Hazard stripe overlay (reused by the command-card START bar)
   ctaStripes: { position: 'absolute', top: 0, right: 0, bottom: 0, left: 0, flexDirection: 'row', overflow: 'hidden' },

@@ -30,6 +30,8 @@ function isWorkingSet(set, pattern) {
 // the window; real wins always lead, these trail.
 // `action` marks a tappable tip (HighlightReel calls onTip(action)); `cta` is the hint.
 const FIRST_RUN_TIPS = [
+  { key: 'tip-howto', icon: 'rocket-launch', tone: 'acc', kicker: 'START HERE',
+    title: 'Get the Most Out of SWOLE/OS', sub: 'Six habits that make your coaching sharper — tap to see them.', sub2: true, action: 'howto', cta: 'OPEN' },
   { key: 'tip-health', icon: 'heart-pulse', tone: 'acc', kicker: 'SETUP',
     title: 'Sync Apple Health', sub: 'Connect for deep insight into your physique, recovery and progress.', sub2: true, action: 'health', cta: 'CONNECT' },
   { key: 'tip-rpe', icon: 'gauge', tone: 'acc', kicker: 'TRAINING 101',
@@ -87,6 +89,29 @@ export function buildHighlights({ sessions = [], loggedDates = {}, weekStats = {
       big: pr.pct >= 1 ? `+${pr.pct}%` : null,
     });
     if (seenPr.size >= 2) break;
+  }
+
+  // --- This-week snapshot — a live read of the current training week ---
+  let rpeSum = 0, rpeN = 0;
+  for (const sess of sessions) {
+    if (new Date(sess.performed_at).getTime() < thisMon) continue;
+    for (const ex of sess.session_exercises || []) {
+      const pattern = ex.exercises?.movement_pattern;
+      for (const st of ex.set_logs || []) {
+        if (st.rpe == null || !isWorkingSet(st, pattern)) continue;
+        rpeSum += st.rpe; rpeN++;
+      }
+    }
+  }
+  const wkAvgRpe = rpeN ? rpeSum / rpeN : null;
+  if ((weekStats.workouts || 0) > 0) {
+    out.push({
+      key: 'snapshot', icon: 'calendar-week', tone: 'acc',
+      kicker: 'THIS WEEK',
+      title: `${weekStats.workouts} Session${weekStats.workouts === 1 ? '' : 's'} In`,
+      sub: `${weekStats.hardSets || 0} working sets · ${fmtVol(weekStats.volume || 0)} lbs${wkAvgRpe != null ? ` · avg RPE ${wkAvgRpe.toFixed(1)}` : ''}`,
+      sub2: true, big: null,
+    });
   }
 
   // --- Streak: consecutive weeks with >=1 logged session ---
