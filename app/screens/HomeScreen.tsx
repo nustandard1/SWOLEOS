@@ -1,5 +1,5 @@
 // @ts-nocheck
-import React, { useState, useCallback, useRef } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView,
   TouchableOpacity, SafeAreaView, Modal, Alert,
@@ -104,13 +104,45 @@ export default function HomeScreen() {
 
   const [loading, setLoading]       = useState(true);
   const loadedOnce = useRef(false); // spinner only on first load; refresh quietly after
+  const cacheApplied = useRef(false); // rendered last-known data from cache → no cold flash
+
+  // PREMIUM-FEEL: re-hydrate the last rendered snapshot instantly on open (stale-while-
+  // revalidate), so the tab never flashes empty / jumps while the fresh data loads in.
+  useEffect(() => {
+    AsyncStorage.getItem('cache:home').then(raw => {
+      if (!raw || loadedOnce.current) return;
+      try {
+        const c = JSON.parse(raw);
+        if (c.name != null) setName(c.name);
+        if (c.tier) setTier(c.tier);
+        if (c.weekStats) setWeekStats(c.weekStats);
+        if (c.highlights?.length) setHighlights(c.highlights);
+        if (c.score) setScore(c.score);
+        if ('nextSession' in c) setNextSession(c.nextSession);
+        if (c.schedule) setSchedule(c.schedule);
+        if (c.loggedDates) setLoggedDates(c.loggedDates);
+        if (c.plannedPerWeek != null) setPlannedPerWeek(c.plannedPerWeek);
+        if (c.scheduleStart) setScheduleStart(c.scheduleStart);
+        if (c.activeTemplateId) setActiveTemplateId(c.activeTemplateId);
+        cacheApplied.current = true;
+        setLoading(false);
+      } catch (e) { /* corrupt cache — ignore */ }
+    }).catch(() => {});
+  }, []);
+
+  // Persist the snapshot whenever the live data settles, for the next open.
+  useEffect(() => {
+    if (loading) return;
+    const snap = { name, tier, weekStats, highlights, score, nextSession, schedule, loggedDates, plannedPerWeek, scheduleStart, activeTemplateId };
+    AsyncStorage.setItem('cache:home', JSON.stringify(snap)).catch(() => {});
+  }, [loading, name, tier, weekStats, highlights, score, nextSession, schedule, loggedDates, plannedPerWeek, scheduleStart, activeTemplateId]);
 
   useFocusEffect(
     useCallback(() => { loadHome(); setFocusKey(k => k + 1); setStartPhrase(START_PHRASES[Math.floor(Math.random() * START_PHRASES.length)]); }, [])
   );
 
   async function loadHome() {
-    if (!loadedOnce.current) setLoading(true);
+    if (!loadedOnce.current && !cacheApplied.current) setLoading(true); // cache already shows something
     loadedOnce.current = true;
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) { setLoading(false); return; }
