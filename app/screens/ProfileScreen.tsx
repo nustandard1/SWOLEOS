@@ -1,5 +1,6 @@
 // @ts-nocheck
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   View, Text, StyleSheet, SafeAreaView, ScrollView,
   TouchableOpacity, Alert, Modal, TextInput,
@@ -83,6 +84,9 @@ export default function ProfileScreen() {
   const [hasSessions, setHasSessions] = useState(true); // default true so the to-do doesn't flash pre-load
   const [dismissed, setDismissed] = useState({});       // setup items the user X'd this session
   const [goalLocked, setGoalLocked] = useState(true);   // goal locked once set — tap unlock to change (no accidental toggles)
+  const [effortUnit, setEffortUnit] = useState('rpe');  // how effort is shown/entered in the logger: RPE (default) or RIR
+  useEffect(() => { AsyncStorage.getItem('swoleos_effort_unit').then(v => { if (v === 'rir') setEffortUnit('rir'); }).catch(() => {}); }, []);
+  function pickEffortUnit(u) { setEffortUnit(u); AsyncStorage.setItem('swoleos_effort_unit', u).catch(() => {}); }
   const [showWeighIn, setShowWeighIn] = useState(false);
   const [wiWeight, setWiWeight] = useState('');
   const [wiBf, setWiBf] = useState('');
@@ -427,6 +431,21 @@ export default function ProfileScreen() {
           </>
         )}
 
+        {/* Effort unit — RPE (default) or RIR; mirror conversion, display only */}
+        <View style={s.effortRow}>
+          <View style={{ flex: 1 }}>
+            <Text style={s.effortTitle}>EFFORT SCALE</Text>
+            <Text style={s.effortSub}>How sets are rated in the logger. RIR = reps in reserve (10 − RPE).</Text>
+          </View>
+          <View style={s.effortSeg}>
+            {['rpe', 'rir'].map(u => (
+              <TouchableOpacity key={u} style={[s.effortSegBtn, effortUnit === u && s.effortSegBtnOn]} onPress={() => pickEffortUnit(u)} activeOpacity={0.85}>
+                <Text style={[s.effortSegText, effortUnit === u && s.effortSegTextOn]}>{u.toUpperCase()}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+
         {/* Manual weigh-in — for lifters without a smart scale / Apple Health */}
         <TouchableOpacity style={s.weighInBtn} onPress={() => setShowWeighIn(true)} activeOpacity={0.8}>
           <View style={s.weighInIcon}><MaterialCommunityIcons name="scale-bathroom" size={18} color={colors.acc} /></View>
@@ -714,6 +733,14 @@ const s = StyleSheet.create({
   goalExplain: { fontFamily: fonts.body, fontSize: 12.5, color: colors.muted, lineHeight: 18, marginTop: 8 },
 
   // Manual weigh-in
+  effortRow: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1.5, borderColor: colors.line, backgroundColor: colors.surf, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 14, marginBottom: space.md },
+  effortTitle: { fontFamily: fonts.bodySemi, fontSize: 12, color: colors.text, textTransform: 'uppercase', letterSpacing: 1 },
+  effortSub: { fontFamily: fonts.body, fontSize: 11.5, color: colors.muted, lineHeight: 15, marginTop: 2 },
+  effortSeg: { flexDirection: 'row', borderWidth: 1.5, borderColor: colors.line2, borderRadius: 8, overflow: 'hidden' },
+  effortSegBtn: { paddingHorizontal: 12, paddingVertical: 7 },
+  effortSegBtnOn: { backgroundColor: colors.acc },
+  effortSegText: { fontFamily: fonts.bodyBold, fontSize: 11, color: colors.muted, letterSpacing: 0.8 },
+  effortSegTextOn: { color: colors.onAcc },
   weighInBtn: { flexDirection: 'row', alignItems: 'center', gap: 12, borderWidth: 1.5, borderColor: colors.line, backgroundColor: colors.surf, borderRadius: 12, paddingVertical: 12, paddingHorizontal: 14, marginBottom: space.xl },
   weighInIcon: { width: 36, height: 36, borderRadius: 10, backgroundColor: 'rgba(255,255,255,0.06)', alignItems: 'center', justifyContent: 'center' },
   weighInTitle: { fontFamily: fonts.display, fontSize: 15, color: colors.text, textTransform: 'uppercase', letterSpacing: 0.3 },

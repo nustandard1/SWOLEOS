@@ -44,13 +44,17 @@ function ghostFor(history, i) {
 // Weight/reps keep the full digit grid.
 const RPE_PAD = ['6', '6.5', '7', '7.5', '8', '8.5', '9', '9.5', '10'];
 const KEYS = ['1','2','3','4','5','6','7','8','9','.','0','del'];
+// RPE ↔ RIR are the same scale mirrored (RIR = 10 − RPE). We always STORE RPE; the unit
+// only changes what the lifter sees (a slick option for RIR users; default stays RPE).
+const rpeToRir = (v) => { const n = 10 - parseFloat(v); return Number.isInteger(n) ? String(n) : n.toFixed(1); };
 
 // The advance key chains the fields: weight → reps → RPE → ✓done. It's orange
 // ("NEXT") while moving through fields, green ("DONE") on the RPE step where one
 // tap marks the set done and jumps to the next set's weight. Skip RPE by tapping
 // DONE without choosing one.
-function Keypad({ visible, label, isRpe, value, onKey, onChipRpe, onClearRpe, onDone, onAdvance, advanceDone }) {
+function Keypad({ visible, label, isRpe, value, onKey, onChipRpe, onClearRpe, onDone, onAdvance, advanceDone, effortUnit }) {
   if (!visible) return null;
+  const rir = effortUnit === 'rir';
   return (
     <View style={kp.container}>
       <View style={kp.bar}>
@@ -66,12 +70,12 @@ function Keypad({ visible, label, isRpe, value, onKey, onChipRpe, onClearRpe, on
               <View style={kp.rpeGrid}>
                 {RPE_PAD.map(v => (
                   <TouchableOpacity key={v} style={[kp.rpeKey, value === v && kp.rpeKeyOn]} onPress={() => onChipRpe(v)}>
-                    <Text style={[kp.rpeKeyText, value === v && kp.rpeKeyTextOn]}>{v}</Text>
+                    <Text style={[kp.rpeKeyText, value === v && kp.rpeKeyTextOn]}>{rir ? rpeToRir(v) : v}</Text>
                   </TouchableOpacity>
                 ))}
               </View>
               <TouchableOpacity style={kp.rpeClear} onPress={onClearRpe}>
-                <Text style={kp.rpeClearText}>CLEAR RPE</Text>
+                <Text style={kp.rpeClearText}>CLEAR {rir ? 'RIR' : 'RPE'}</Text>
               </TouchableOpacity>
             </>
           ) : (
@@ -584,6 +588,8 @@ export default function WorkoutLoggerScreen() {
     return () => clearInterval(id);
   }, []);
   const [showRpeHelp, setShowRpeHelp] = useState(false);
+  const [effortUnit, setEffortUnit]   = useState('rpe'); // 'rpe' | 'rir' — display only (always stores RPE)
+  useEffect(() => { AsyncStorage.getItem('swoleos_effort_unit').then(v => { if (v === 'rir') setEffortUnit('rir'); }).catch(() => {}); }, []);
   const [videoModal, setVideoModal]   = useState(null); // { url, name } — the inline demo player
   const [noteTarget, setNoteTarget]   = useState(null); // {type:'session'} | {type:'ex', exIdx}
   const [noteDraft, setNoteDraft]     = useState('');
@@ -1448,7 +1454,7 @@ export default function WorkoutLoggerScreen() {
                 <Text style={s.colHdr}>REPS{item.sets.length > 1 ? ' ▾' : ''}</Text>
               </TouchableOpacity>
               <TouchableOpacity style={{ flex: 1, flexDirection: 'row', alignItems: 'center', gap: 3 }} onPress={() => setShowRpeHelp(true)} hitSlop={{ top: 10, bottom: 10, left: 6, right: 6 }}>
-                <Text style={s.colHdr}>RPE</Text>
+                <Text style={s.colHdr}>{effortUnit === 'rir' ? 'RIR' : 'RPE'}</Text>
                 <Text style={[s.colHdr, { color: colors.muted }]}>ⓘ</Text>
               </TouchableOpacity>
               <TouchableOpacity style={{ width: 36 }} onPress={() => toggleAllDone(exIdx)} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
@@ -1467,7 +1473,7 @@ export default function WorkoutLoggerScreen() {
               const lastDisp = (lastG && lastG.w) ? `${lastG.w}×${lastG.r}` : '—';
               const wDisp = cellDisplay(set, 'w');
               const rDisp = cellDisplay(set, 'r');
-              const rpeDisp = set.rpe ? { text: set.rpe, ghost: false } : { text: '—', ghost: true };
+              const rpeDisp = set.rpe ? { text: effortUnit === 'rir' ? rpeToRir(set.rpe) : set.rpe, ghost: false } : { text: '—', ghost: true };
               // PR marks only the set that BEATS the running best (incl. last session + earlier sets this session).
               const setE = (+set.w || 0) * (1 + (+set.r || 0) / 30);
               const overload = set.done && !isWarmup && exLastBest > 0 && setE > runBest + 0.5;
@@ -1621,7 +1627,7 @@ export default function WorkoutLoggerScreen() {
       {/* Custom keypad */}
       <Keypad
         visible={keypadVisible}
-        label={sel?.field === 'w' ? 'WEIGHT (LBS)' : sel?.field === 'r' ? 'REPS' : 'RPE'}
+        label={sel?.field === 'w' ? 'WEIGHT (LBS)' : sel?.field === 'r' ? 'REPS' : (effortUnit === 'rir' ? 'RIR' : 'RPE')}
         isRpe={sel?.field === 'rpe'}
         value={currentKeypadVal}
         onKey={handleKey}
@@ -1630,6 +1636,7 @@ export default function WorkoutLoggerScreen() {
         onDone={doneKeypad}
         onAdvance={handleAdvance}
         advanceDone={sel?.field === 'rpe'}
+        effortUnit={effortUnit}
       />
 
       {/* RPE explainer */}
