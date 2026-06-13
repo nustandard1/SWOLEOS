@@ -597,6 +597,58 @@ export function buildBreakdown({ sessions = [] }) {
 // INSIGHTS — a few noteworthy, non-obvious observations the lifter may not have
 // clocked. Diagnostic (what's happening), not prescriptive (that's Suggestions).
 // Everything requires REAL time span, so same-day test clusters surface nothing.
+// Set-to-set drop-off within ONE exercise in ONE session: do the reps fall off (and RPE
+// climb) across the straight sets at the working weight? Returns null unless there are ≥2
+// working sets at the same load.
+function sessionExerciseFade(setLogs, pattern) {
+  const ws = (setLogs || [])
+    .filter(st => isWorkingSet(st, pattern) && st.reps > 0 && st.weight > 0)
+    .sort((a, b) => (a.set_number ?? 0) - (b.set_number ?? 0));
+  if (ws.length < 2) return null;
+  const w0 = ws[0].weight;
+  const atW = ws.filter(st => Math.abs(st.weight - w0) <= 2.5); // straight sets at the work weight
+  if (atW.length < 2) return null;
+  const repFirst = atW[0].reps, repLast = atW[atW.length - 1].reps;
+  if (repFirst <= 0) return null;
+  const fadePct = (repFirst - repLast) / repFirst;
+  const rpeFirst = atW[0].rpe, rpeLast = atW[atW.length - 1].rpe;
+  const rpeRise = (rpeFirst != null && rpeLast != null) ? rpeLast - rpeFirst : null;
+  const hard = fadePct >= 0.3 || (fadePct >= 0.2 && rpeRise != null && rpeRise >= 1.5);
+  return { hard };
+}
+
+// Reads set-to-set drop-off against the lifter's OWN baseline (spec, Mike): a NEW/sudden
+// widespread fade = fatigue; a CHRONIC fade for a beginner = work capacity; chronic fade
+// for an experienced lifter = grinding too hard. Never asserts capacity when fatigue is
+// plausible. Returns a single insight (or null when there isn't enough to read).
+export function buildFadeRead({ sessions = [], experience = null }) {
+  const now = Date.now();
+  let recHard = 0, recTot = 0, priHard = 0, priTot = 0;
+  for (const s of sessions) {
+    const age = now - new Date(s.performed_at).getTime();
+    const recent = age <= 28 * DAY, prior = age > 28 * DAY && age <= 56 * DAY;
+    if (!recent && !prior) continue;
+    for (const e of s.session_exercises || []) {
+      const f = sessionExerciseFade(e.set_logs, e.exercises?.movement_pattern);
+      if (!f) continue;
+      if (recent) { recTot++; if (f.hard) recHard++; }
+      else { priTot++; if (f.hard) priHard++; }
+    }
+  }
+  if (recTot < 4) return null;            // not enough straight-set lifts to read
+  const recRate = recHard / recTot;
+  if (recRate < 0.4) return null;         // fade isn't widespread enough to flag
+  const priRate = priTot >= 4 ? priHard / priTot : null;
+  const isNew = priRate != null && priRate < recRate * 0.6; // wasn't happening before
+  if (isNew) {
+    return { icon: 'battery-low', tone: 'flag', sev: 3, text: 'Your reps are falling off hard set-to-set lately — more than they used to. That reads as fatigue, not your norm. Ease the intensity a notch and let recovery catch up.' };
+  }
+  if (experience === 'beginner') {
+    return { icon: 'arm-flex', tone: 'mid', sev: 1, text: 'You fade a lot late in your lifts — first set strong, last set a grind. That’s work capacity, and it builds fast with consistent training. Keep showing up.' };
+  }
+  return { icon: 'battery-low', tone: 'mid', sev: 2, text: 'You’re routinely grinding your last sets into the ground — big drop-offs set to set. Leaving a rep in the tank earlier keeps more quality across the whole session.' };
+}
+
 export function buildInsights({ sessions = [] }) {
   const now = Date.now();
   const recentStart = now - 28 * DAY, priorStart = now - 56 * DAY, MIN_SPAN = 5 * DAY;
@@ -685,18 +737,19 @@ export async function getIntelligence(userId) {
       .select(`performed_at,
         session_exercises(
           exercises(name, primary_muscle, movement_pattern),
-          set_logs(weight, reps, rpe, is_warmup)
+          set_logs(set_number, weight, reps, rpe, is_warmup)
         )`)
       .eq('user_id', userId)
       .gte('performed_at', since)
       .order('performed_at', { ascending: true }),
-    supabase.from('users').select('current_phase, phase_changed_at').eq('id', userId).maybeSingle(),
+    supabase.from('users').select('current_phase, phase_changed_at, experience_level').eq('id', userId).maybeSingle(),
     // limit(1) not maybeSingle — multiple active templates (from testing) would otherwise throw.
     supabase.from('workout_templates').select('template_sessions(id)').eq('user_id', userId).eq('is_active', true).order('created_at', { ascending: false }).limit(1),
   ]);
   const sessions = sessRes.data || [];
   const phase = userRes.data?.current_phase || null;
   const phaseChangedAt = userRes.data?.phase_changed_at || null;
+  const experience = userRes.data?.experience_level || null;
   const plannedPerWeek = (tmplRes.data?.[0]?.template_sessions || []).length;
 
   const body = await getMergedBody(userId, await accountCreatedMs());
@@ -705,6 +758,9 @@ export async function getIntelligence(userId) {
   const score = buildScore({ sessions, plannedPerWeek, phase });
   const doThis = buildDirectives({ views, score, sessions, phase });
   const insights = buildInsights({ sessions });
+  // Set-to-set drop-off read — a significant signal, so it leads the insights when present.
+  const fadeRead = buildFadeRead({ sessions, experience });
+  if (fadeRead) insights.unshift(fadeRead);
   const breakdown = buildBreakdown({ sessions });
   return { hasData: sessions.length > 0, score, views, doThis, insights, breakdown };
 }
