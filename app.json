@@ -1,21 +1,32 @@
 {
   "expo": {
-    "name": "SWOLEOS2",
-    "slug": "SWOLEOS2",
+    "name": "SWOLE OS",
+    "slug": "swoleos",
     "version": "1.0.0",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/d7c90b83-fa00-4af1-890a-bdb3100eab02"
+    },
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
-    "newArchEnabled": false,
+    "newArchEnabled": true,
     "splash": {
       "image": "./assets/splash-icon.png",
       "resizeMode": "contain",
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.swoleos.app",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "android": {
+      "package": "com.swoleos.app",
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
@@ -25,6 +36,21 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "expo-font",
+      [
+        "@kingstinct/react-native-healthkit",
+        {
+          "NSHealthShareUsageDescription": "SWOLE OS reads your weight, body composition, and recovery metrics from Apple Health to analyze your training and progress."
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "d7c90b83-fa00-4af1-890a-bdb3100eab02"
+      }
+    },
+    "owner": "swole"
   }
 }

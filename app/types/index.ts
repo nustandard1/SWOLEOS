@@ -113,6 +113,7 @@ export interface WorkoutSession {
   template_id?: string;
   session_name: string;
   performed_at: string;
+  duration_seconds?: number;
   notes?: string;
 }
 
