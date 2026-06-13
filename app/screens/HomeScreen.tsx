@@ -26,6 +26,8 @@ import { getIntelligence } from '../lib/trendPairs';
 import ScoreChip from '../components/ScoreChip';
 
 const WEEKDAYS = ['SUNDAY', 'MONDAY', 'TUESDAY', 'WEDNESDAY', 'THURSDAY', 'FRIDAY', 'SATURDAY'];
+// The "start" CTA rotates through these on each visit — FORGE edge, no fluff.
+const START_PHRASES = ['START WORKOUT', 'GET UNDER THE BAR', 'ENTER THE ARENA', "THE IRON'S WAITING", 'TIME TO TRAIN', "WORK TO DO — LET'S GO", 'GROWTH AWAITS'];
 function todayWeekday() { return WEEKDAYS[new Date().getDay()]; }
 function greetingSentence() {
   const h = new Date().getHours();
@@ -66,6 +68,7 @@ export default function HomeScreen() {
   const [tier, setTier]             = useState('free');
   const [weekStats, setWeekStats]   = useState({ workouts: 0, hardSets: 0, volume: 0 });
   const [focusKey, setFocusKey]     = useState(0);
+  const [startPhrase, setStartPhrase] = useState('START WORKOUT');
   const [highlights, setHighlights] = useState([]);
   const [score, setScore] = useState(null);
   const [plannedPerWeek, setPlannedPerWeek] = useState(0);
@@ -101,7 +104,7 @@ export default function HomeScreen() {
   const loadedOnce = useRef(false); // spinner only on first load; refresh quietly after
 
   useFocusEffect(
-    useCallback(() => { loadHome(); setFocusKey(k => k + 1); }, [])
+    useCallback(() => { loadHome(); setFocusKey(k => k + 1); setStartPhrase(START_PHRASES[Math.floor(Math.random() * START_PHRASES.length)]); }, [])
   );
 
   async function loadHome() {
@@ -255,6 +258,29 @@ export default function HomeScreen() {
     else if (nextSession?.built) navigation.navigate('WorkoutLogger', { templateSessionId: nextSession.sessionId, templateId: nextSession.templateId });
     else navigation.navigate('WorkoutLogger', undefined);
   }
+  function startSession(sess) {
+    if (sess?.built) navigation.navigate('WorkoutLogger', { templateSessionId: sess.id, templateId: activeTemplateId });
+    else if (sess) Alert.alert('Not built yet', `"${sess.name}" has no exercises. Build it in the Train tab.`);
+    else navigation.navigate('WorkoutLogger', undefined);
+  }
+
+  // Command-card mode — the rest-day / on-track logic. On a program: do today's session;
+  // if behind (a scheduled day earlier this week with no log), offer that catch-up; if up
+  // to date on an off day, it's a rest day (still loggable). No program → always a start CTA.
+  const hasProgram = !!nextSession;
+  const monStart = (() => { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() - ((d.getDay() + 6) % 7)); return d.getTime(); })();
+  const weekLoggedDows = new Set();
+  for (const k of Object.keys(loggedDates)) {
+    const p = k.split('-').map(Number); const dd = new Date(p[0], p[1] - 1, p[2]);
+    if (dd.getTime() >= monStart) weekLoggedDows.add((dd.getDay() + 6) % 7);
+  }
+  const missedDows = hasProgram ? Object.keys(schedule).map(Number).filter(d => d < todayDow && !weekLoggedDows.has(d)) : [];
+  const behindSession = missedDows.length ? schedule[Math.max(...missedDows)] : null;
+  const cardMode = todayLoggedId ? 'complete'
+    : todaySession ? 'today'
+    : behindSession ? 'catchup'
+    : hasProgram ? 'rest'
+    : 'open';
 
   return (
     <SafeAreaView style={s.safe}>
@@ -289,7 +315,12 @@ export default function HomeScreen() {
             Once today's session is logged it flips to a calm "complete · view" state. */}
         <TouchableOpacity
           style={s.cmd}
-          onPress={() => todayLoggedId ? navigation.navigate('WorkoutLogger', { editSessionId: todayLoggedId }) : startToday()}
+          onPress={() => {
+            if (cardMode === 'complete') navigation.navigate('WorkoutLogger', { editSessionId: todayLoggedId });
+            else if (cardMode === 'catchup') startSession(behindSession);
+            else if (cardMode === 'rest') navigation.navigate('WorkoutLogger', undefined);
+            else startToday();
+          }}
           activeOpacity={0.92}
         >
           <View style={s.cmdTop}>
@@ -304,22 +335,27 @@ export default function HomeScreen() {
               </View>
             )}
             <Text style={s.cmdToday}>
-              {todayLoggedId
-                ? "TODAY'S SESSION COMPLETE"
-                : todaySession
-                  ? `TODAY · ${todaySession.name.toUpperCase()}`
-                  : nextSession
-                    ? `UP NEXT · ${nextSession.sessionName.toUpperCase()}`
-                    : 'READY WHEN YOU ARE'}
+              {cardMode === 'complete' ? "TODAY'S SESSION COMPLETE"
+                : cardMode === 'today' ? `TODAY · ${todaySession.name.toUpperCase()}`
+                : cardMode === 'catchup' ? `CATCH UP · ${behindSession.name.toUpperCase()}`
+                : cardMode === 'rest' ? 'REST OR CARDIO DAY'
+                : 'READY WHEN YOU ARE'}
             </Text>
           </View>
 
-          {todayLoggedId ? (
+          {cardMode === 'complete' ? (
             <View style={s.cmdDone}>
               <MaterialCommunityIcons name="check-circle" size={18} color={colors.statusGood} />
               <Text style={s.cmdDoneText}>SESSION COMPLETE</Text>
               <View style={{ flex: 1 }} />
               <Text style={s.cmdDoneView}>VIEW →</Text>
+            </View>
+          ) : cardMode === 'rest' ? (
+            <View style={s.cmdRest}>
+              <MaterialCommunityIcons name="sleep" size={17} color={colors.muted} />
+              <Text style={s.cmdRestText}>YOU'RE ON TRACK — RECOVER</Text>
+              <View style={{ flex: 1 }} />
+              <Text style={s.cmdRestAdd}>LOG ANYWAY →</Text>
             </View>
           ) : (
             <View style={s.cmdStart}>
@@ -329,7 +365,7 @@ export default function HomeScreen() {
                   <View key={i} style={[s.stripe, { left: i * 28 - 20 }]} />
                 ))}
               </View>
-              <Text style={s.cmdStartText}>START WORKOUT</Text>
+              <Text style={s.cmdStartText}>{startPhrase}</Text>
               <Text style={s.cmdStartArrow}>→</Text>
             </View>
           )}
@@ -482,6 +518,10 @@ const s = StyleSheet.create({
   },
   cmdDoneText: { fontFamily: fonts.bodyBold, fontSize: 13, color: colors.statusGood, textTransform: 'uppercase', letterSpacing: 1 },
   cmdDoneView: { fontFamily: fonts.bodySemi, fontSize: 12, color: colors.muted, textTransform: 'uppercase', letterSpacing: 1 },
+  // Rest day, on track — calm, not a "go" CTA, but still loggable.
+  cmdRest: { backgroundColor: colors.surf2, flexDirection: 'row', alignItems: 'center', gap: 9, paddingHorizontal: space.md, minHeight: 52, borderTopWidth: 1.5, borderTopColor: colors.line },
+  cmdRestText: { fontFamily: fonts.bodyBold, fontSize: 12.5, color: colors.muted, textTransform: 'uppercase', letterSpacing: 1 },
+  cmdRestAdd: { fontFamily: fonts.bodySemi, fontSize: 11, color: colors.dim, textTransform: 'uppercase', letterSpacing: 1 },
 
   // First-run tip modals (RPE explainer + Apple Health connect)
   modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', paddingHorizontal: space.lg },

@@ -44,7 +44,7 @@ export default function ScoreChip({ score, trigger, onPress }) {
         <View style={s.ringCenter}><CountUp value={score.overall} trigger={trigger} duration={1000} style={s.num} /></View>
       </View>
       <View style={s.col}>
-        <Text style={s.kicker}>TRAINING SCORE</Text>
+        <Text style={s.kicker}>TRAINING STATUS</Text>
         <Text style={[s.band, { color }]}>{score.band}{score.baseline ? ' · BASELINE' : ''}</Text>
         <Text style={s.cap} numberOfLines={2}>{score.caption}</Text>
       </View>

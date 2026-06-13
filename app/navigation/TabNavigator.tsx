@@ -58,6 +58,16 @@ function FABButton() {
     (async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
+      // Already trained today? Don't offer "Today's session" again (Empty Session is still there).
+      const todayStart = new Date(); todayStart.setHours(0, 0, 0, 0);
+      const { data: todayLog } = await supabase
+        .from('workout_sessions')
+        .select('id')
+        .eq('user_id', user.id)
+        .gte('performed_at', todayStart.toISOString())
+        .limit(1)
+        .maybeSingle();
+      if (todayLog) return;
       const { data } = await supabase
         .from('workout_templates')
         .select(`id, split_type, current_session_index,

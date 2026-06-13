@@ -355,7 +355,7 @@ export default function ProfileScreen() {
   // when everything's done. The X dismisses an item for the session.
   const todoItems = [
     !hasSessions && { key: 'log', icon: 'dumbbell', label: 'Log your first session', sub: 'Tap + and start training', onPress: () => navigation.navigate('WorkoutLogger', undefined) },
-    !program && { key: 'program', icon: 'clipboard-text', label: 'Set up a program', sub: 'Build a template or choose a PRO program', onPress: () => navigation.navigate('SplitPicker') },
+    !program && { key: 'program', icon: 'clipboard-text', label: 'Set up a program', sub: 'Build a template or choose a PRO program', onPress: () => navigation.navigate('Train') },
     (!profile?.current_phase || profile?.current_phase === 'none') && { key: 'phase', icon: 'target', label: 'Set your current goal', sub: 'Pick a phase above — bulk, cut, recomp…', onPress: null },
     isHealthAvailable() && !leanHasData && { key: 'health', icon: 'heart-pulse', label: 'Connect Apple Health', sub: 'Track weight & body composition', onPress: connectHealth },
   ].filter(Boolean).filter(t => !dismissed[t.key]);
