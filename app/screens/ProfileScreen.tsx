@@ -33,6 +33,7 @@ const GOALS = [
   { k: 'recomp',    label: 'RECOMP' },
   { k: 'maintain',  label: 'MAINTAIN' },
   { k: 'lean',      label: 'CUTTING' },
+  { k: 'strength',  label: 'STRENGTH' },
 ];
 // One-line explanation shown under the selected goal.
 const GOAL_INFO = {
@@ -41,6 +42,7 @@ const GOAL_INFO = {
   recomp:    'Hold your bodyweight while getting leaner and building muscle.',
   maintain:  'Keep what you’ve got — strength, body composition, and bodyweight.',
   lean:      'Get leaner and lose weight while keeping as much lean mass as possible.',
+  strength:  'Focused on strength and performance — physique is secondary. Lean mass still matters; it drives capability.',
 };
 
 // Alphabetical — zero-friction scanning, same rule as every picker in the app.

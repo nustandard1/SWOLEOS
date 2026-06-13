@@ -27,6 +27,7 @@ export interface CalibrationProfile {
   experience_level?: ExpLevel | null;
   archetype?: string | null; // 'compound' | 'physique' | 'both'
   goal?: string | null;      // top goal key
+  current_phase?: string | null; // active phase: gain/lean_gain/recomp/maintain/lean/strength
 }
 
 export interface ExerciseMeta {
@@ -367,9 +368,13 @@ export function buildProgressionGuidance(
   const rpes = sets.map(s => s.rpe).filter((r): r is number => r != null);
   const avgRpe = rpes.length ? rpes.reduce((a, b) => a + b, 0) / rpes.length : null;
   const inc = increment(cls);
-  const isPhysique = profile?.archetype === 'physique'
+  // A 'strength' phase overrides any physique archetype — strength is the priority, so we
+  // bias load-first and never push volume "for size" (spec §8).
+  const isStrengthFocus = profile?.current_phase === 'strength';
+  const isPhysique = !isStrengthFocus && (
+    profile?.archetype === 'physique'
     || profile?.goal === 'build_muscle'
-    || profile?.goal === 'physique';
+    || profile?.goal === 'physique');
 
   const targets: TargetOption[] = [];
   const allHitTop = minRepAtTop >= range.max;

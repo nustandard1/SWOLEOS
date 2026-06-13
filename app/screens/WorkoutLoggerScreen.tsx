@@ -649,7 +649,7 @@ export default function WorkoutLoggerScreen() {
       setUserId(user.id);
       const { data: prof } = await supabase
         .from('users')
-        .select('rep_preference, experience_level, archetype, goal')
+        .select('rep_preference, experience_level, archetype, goal, current_phase')
         .eq('id', user.id)
         .single();
       profileRef.current = prof || {};

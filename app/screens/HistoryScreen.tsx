@@ -81,6 +81,7 @@ export default function HistoryScreen() {
   const [recStats, setRecStats]           = useState({ prs: 0, monthPrs: 0, heaviest: 0 });
   const [strength, setStrength]           = useState(null);      // { slots, score, logged }
   const [showStrInfo, setShowStrInfo]     = useState(false);
+  const [strExpanded, setStrExpanded]     = useState(false);    // strength score: score-only until tapped open
   const [search, setSearch]               = useState('');
   const [loading, setLoading]             = useState(true);
   const [selectedSession, setSelected]    = useState(null);
@@ -174,12 +175,14 @@ export default function HistoryScreen() {
       ex.sets.sort((a, b) => a.t - b.t);
 
       let best = null;        // running all-time best (by e1RM)
+      let best5 = null;       // best e1RM from ≤5-rep sets only (for the strength score)
       const events = [];      // record-break moments
       const byReps = {};      // rep count -> best weight at that count
       const bySession = {};   // sessionId -> { t, name, top, sets }
 
       for (const st of ex.sets) {
         const e = e1rm(st.w, st.r);
+        if (st.r <= 5 && (!best5 || e > best5.e)) best5 = { w: st.w, r: st.r, t: st.t, e };
         if (st.w > heaviest) heaviest = st.w;
         if (best && e > best.e * 1.001) events.push({ t: st.t, w: st.w, r: st.r, e });
         if (!best || e > best.e) best = { w: st.w, r: st.r, t: st.t, e };
@@ -199,6 +202,7 @@ export default function HistoryScreen() {
       rows.push({
         ...ex,
         best,
+        best5,
         big: isBigBarbell(ex.name, ex.pattern),
         fresh: Date.now() - best.t <= FRESH_MS,
         events, byReps,
@@ -216,46 +220,26 @@ export default function HistoryScreen() {
     setRecords(groups);
     setRecStats({ prs, monthPrs, heaviest });
 
-    // STRENGTH category + score — best est-1RM per big lift (trap-bar DL × 0.9).
-    // Latest bodyweight (Apple Health) so weighted pull-ups count the lifter's weight.
-    let bodyweight = 0;
-    try {
-      const { weight } = await getMergedBody(uid, Date.now() - 56 * 86400000);
-      if (weight?.length) bodyweight = [...weight].sort((a, b) => b.date - a.date)[0].value;
-    } catch (e) { /* no body data — pull-up falls back to added weight only */ }
-
+    // STRENGTH category + score — a classic powerlifting total: best est-1RM on
+    // squat + bench + deadlift (trap-bar DL × 0.9). e1RM is only trusted on ≤5-rep sets
+    // (best5), and the SCORE only populates once all three lifts have a value.
     const slots = STRENGTH_SLOTS.map(slot => {
       let best = null;
       for (const r of rows) {
+        if (!r.best5) continue; // need a low-rep (≤5) set to estimate strength
         const n = r.name.toLowerCase();
         if (!slot.match(n)) continue;
         const isTrap = slot.trap ? slot.trap(n) : false;
-        const adjE = r.best.e * (isTrap ? 0.9 : 1);
+        const adjE = r.best5.e * (isTrap ? 0.9 : 1);
         if (!best || adjE > best.e) best = { rec: r, e: adjE, note: isTrap ? 'TRAP-BAR ×0.9' : slot.label, eLabel: 'EST 1RM' };
       }
       return { key: slot.key, label: slot.label, best };
     });
 
-    // Pull-up slot: weighted pull-up (incl. bodyweight) preferred; else lat-pulldown
-    // 3RM as a handicapped stand-in (pulldown is easier, so you get a 3RM not a 1RM).
-    let puBest = null;
-    for (const r of rows) {
-      if (!isWeightedPullup(r.name.toLowerCase())) continue;
-      const e = (bodyweight + r.best.w) * (1 + r.best.r / 30);
-      if (!puBest || e > puBest.e) puBest = { rec: r, e, note: bodyweight ? '+ BODYWEIGHT' : 'ADDED WEIGHT ONLY', eLabel: 'EST 1RM' };
-    }
-    if (!puBest) {
-      for (const r of rows) {
-        if (!isLatPulldown(r.name.toLowerCase())) continue;
-        const e3 = r.best.e / 1.1; // 1RM → 3RM
-        if (!puBest || e3 > puBest.e) puBest = { rec: r, e: e3, note: 'LAT PULLDOWN · 3RM USED', eLabel: 'EST 3RM' };
-      }
-    }
-    slots.push({ key: 'pullup', label: 'Weighted Pull-Up', best: puBest });
-
     const logged = slots.filter(s => s.best).length;
-    const score = Math.round(slots.reduce((sum, s) => sum + (s.best ? s.best.e : 0), 0));
-    setStrength({ slots, score, logged, total: slots.length });
+    const complete = logged === slots.length; // total only when all 3 lifts are in
+    const score = complete ? Math.round(slots.reduce((sum, s) => sum + (s.best ? s.best.e : 0), 0)) : 0;
+    setStrength({ slots, score, logged, total: slots.length, complete });
   }
 
   async function openDetail(session) {
@@ -439,17 +423,28 @@ export default function HistoryScreen() {
                 <MaterialCommunityIcons name="help-circle-outline" size={16} color={colors.muted} />
               </TouchableOpacity>
             </View>
-            <View style={s.strScore}>
+            {/* Score header — collapsed shows ONLY the score (or a prompt); tap to expand. */}
+            <TouchableOpacity style={s.strScore} activeOpacity={0.8} onPress={() => setStrExpanded(v => !v)}>
               <View>
-                <Text style={s.strScoreNum}>{strength.score.toLocaleString()}</Text>
-                <Text style={s.strScoreLbl}>STRENGTH SCORE · EST 1RM TOTAL</Text>
+                {strength.complete ? (
+                  <>
+                    <Text style={s.strScoreNum}>{strength.score.toLocaleString()}</Text>
+                    <Text style={s.strScoreLbl}>POWERLIFTING TOTAL · EST 1RM</Text>
+                  </>
+                ) : (
+                  <>
+                    <Text style={[s.strScoreNum, { color: colors.dim, fontSize: 30 }]}>—</Text>
+                    <Text style={s.strScoreLbl}>LOG SQUAT · BENCH · DEADLIFT TO SCORE</Text>
+                  </>
+                )}
               </View>
               <View style={s.strScoreCount}>
                 <Text style={s.strScoreCountNum}>{strength.logged}/{strength.total}</Text>
                 <Text style={s.strScoreCountLbl}>LIFTS</Text>
               </View>
-            </View>
-            {strength.slots.map(slot => slot.best ? (
+              <MaterialCommunityIcons name={strExpanded ? 'chevron-up' : 'chevron-down'} size={20} color={colors.dim} style={{ marginLeft: 8 }} />
+            </TouchableOpacity>
+            {strExpanded && strength.slots.map(slot => slot.best ? (
               <TouchableOpacity key={slot.key} style={s.recRow} onPress={() => setExDetail(slot.best.rec)} activeOpacity={0.75}>
                 <View style={[s.recTrophy, slot.best.rec.fresh && s.recTrophyFresh]}>
                   <MaterialCommunityIcons name="trophy" size={17} color={slot.best.rec.fresh ? colors.statusGood : colors.acc} />
@@ -459,7 +454,7 @@ export default function HistoryScreen() {
                   <Text style={s.recWhen}>{slot.best.note}</Text>
                 </View>
                 <View style={{ alignItems: 'flex-end' }}>
-                  <Text style={s.recBest}>{slot.best.rec.best.w} × {slot.best.rec.best.r}</Text>
+                  <Text style={s.recBest}>{slot.best.rec.best5.w} × {slot.best.rec.best5.r}</Text>
                   <Text style={s.recE1rm}>{slot.best.eLabel} {Math.round(slot.best.e)} LB</Text>
                 </View>
                 <MaterialCommunityIcons name="chevron-right" size={18} color={colors.dim} style={{ marginLeft: 4 }} />
@@ -471,7 +466,7 @@ export default function HistoryScreen() {
                 </View>
                 <View style={{ flex: 1 }}>
                   <Text style={[s.recName, { color: colors.muted }]} numberOfLines={1}>{slot.label.toUpperCase()}</Text>
-                  <Text style={s.recWhen}>Log it to complete your score</Text>
+                  <Text style={s.recWhen}>Log a set ≤5 reps to complete your total</Text>
                 </View>
                 <Text style={s.strAddVal}>—</Text>
               </View>
@@ -655,14 +650,13 @@ export default function HistoryScreen() {
           <View style={s.infoCard}>
             <Text style={s.infoTitle}>STRENGTH SCORE</Text>
             <Text style={s.infoBody}>
-              The sum of your best estimated 1-rep max across the big lifts:
+              A classic powerlifting total — the sum of your best estimated 1-rep max on the big three:
             </Text>
+            <Text style={s.infoItem}>· Squat — back or Zercher</Text>
             <Text style={s.infoItem}>· Bench Press</Text>
             <Text style={s.infoItem}>· Deadlift — trap-bar counts ×0.9</Text>
-            <Text style={s.infoItem}>· Squat — back or Zercher</Text>
-            <Text style={s.infoItem}>· Weighted Pull-Up — includes your bodyweight; or Lat Pulldown 3RM if you don’t do weighted pull-ups</Text>
             <Text style={s.infoBody}>
-              Log all four to complete it. One number to track raw strength over time — and chase.
+              Estimated only from sets of 5 reps or fewer (e1RM gets unreliable past that). Log all three to complete your total — one number to track raw strength and chase.
             </Text>
             <TouchableOpacity style={s.infoBtn} onPress={() => setShowStrInfo(false)}>
               <Text style={s.infoBtnText}>GOT IT</Text>
