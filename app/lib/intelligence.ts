@@ -149,20 +149,48 @@ function bestE1rm(session: ExerciseHistory): number {
   return vals.length ? Math.max(...vals) : 0;
 }
 
-function detectPlateau(sessions: ExerciseHistory[], profile: CalibrationProfile) {
-  if (sessions.length < 2) return null;
+// ±4% — the e1RM measurement-noise floor (test–retest CV ~2.3–8.3%; spec §4.4, decision A).
+// A change inside this band is noise, not progress and not a stall.
+export const NOISE_BAND = 0.04;
+
+// Rolling best-e1RM over up to `window` exposures from index i (sessions are
+// most-recent-first). A 3-exposure mean is far less jumpy than a single session.
+function rollingE1rm(sessions: ExerciseHistory[], i: number, window = 3): number {
+  const vals: number[] = [];
+  for (let k = i; k < Math.min(i + window, sessions.length); k++) {
+    const e = bestE1rm(sessions[k]);
+    if (e > 0) vals.push(e);
+  }
+  return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+}
+
+// Consecutive recent exposures whose best e1RM failed to clear the prior ROLLING
+// average by more than the ±4% band. Robust to noise in both directions: one up-wiggle
+// no longer breaks a genuinely-flat run, and a sub-noise "gain" no longer reads as progress.
+// (Replaces the old +0.5 lb threshold, which sat far inside the noise floor → false stalls.)
+function countStalls(sessions: ExerciseHistory[]): number {
   let stalls = 0;
   for (let i = 0; i < sessions.length - 1; i++) {
-    if (bestE1rm(sessions[i]) <= bestE1rm(sessions[i + 1]) + 0.5) stalls++;
-    else break;
+    const cur = bestE1rm(sessions[i]);
+    const prior = rollingE1rm(sessions, i + 1);
+    if (cur <= 0 || prior <= 0) break;
+    if (cur <= prior * (1 + NOISE_BAND)) stalls++; else break;
   }
+  return stalls;
+}
+
+function detectPlateau(sessions: ExerciseHistory[], profile: CalibrationProfile) {
+  if (sessions.length < 2) return null;
+  const stalls = countStalls(sessions);
+  // Decision F: trends act at 2 exposures (1 flat step), firm at 3. Advanced lifters
+  // progress slower, so give them one more exposure of patience before we speak.
   const advanced = profile.experience_level === 'advanced';
-  const warnAt = advanced ? 3 : 2;
+  const warnAt = advanced ? 2 : 1;
   if (stalls >= warnAt + 1) {
     return { level: 'flag' as const, message: 'Stalled 3+ sessions. Recovery or programming is likely off — consider a deload, a lighter 6–7 RPE week, or swapping this lift.' };
   }
   if (stalls >= warnAt) {
-    return { level: 'warn' as const, message: 'No progress in 2 sessions. Chase a rep, or back off slightly to recover.' };
+    return { level: 'warn' as const, message: 'No clear progress lately. Chase a rep, or back off slightly to recover.' };
   }
   return null;
 }
@@ -337,10 +365,7 @@ export function buildProgressionGuidance(
   // Voice = TERSE + data-first by default; blunt/animated only when a real stall earns it.
   // Detect the stall up front so it can override as the headline.
   const plateau = detectPlateau(sessions, profile);
-  let stalls = 0;
-  for (let i = 0; i < sessions.length - 1; i++) {
-    if (bestE1rm(sessions[i]) <= bestE1rm(sessions[i + 1]) + 0.5) stalls++; else break;
-  }
+  const stalls = countStalls(sessions); // shared ±4% rolling-band logic (no more +0.5 lb)
   const freshAlt = `add ${inc} lbs or a rep if you feel good`;
   const rpeLead = avgRpe != null ? `Last: RPE ${avgRpe.toFixed(1)}. ` : '';
   let coachNote: string;
