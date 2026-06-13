@@ -479,6 +479,14 @@ export function buildProgressionGuidance(
     if (v && !targets.some(t => t.label === v.label)) targets.push(v);
   }
 
+  // Detraining (spec §9.4): a real gap since this lift was last trained → start lighter
+  // and climb fast (muscle memory), rather than assuming the old number. Bands: ~2wk → −5%,
+  // 3–4wk → −7.5%, 8wk+ → −12.5%. Also suppresses a false "stall" read across the gap.
+  const lastAt = last?.date ? new Date(last.date).getTime() : 0;
+  const weeksOff = lastAt ? (Date.now() - lastAt) / (7 * 86400000) : 0;
+  const layoffPct = weeksOff >= 8 ? 0.125 : weeksOff >= 3 ? 0.075 : weeksOff >= 1.5 ? 0.05 : 0;
+  const onLayoff = layoffPct > 0;
+
   // Biometric corroboration (spec §9.2, cascade gate 2). RHR is CONFIRMATORY — it
   // strengthens a back-off when performance already says so, never overrides a PR.
   const rhrElevated = !!rhr?.elevated;
@@ -486,7 +494,8 @@ export function buildProgressionGuidance(
 
   // A REAL stall gets the blunt, animated voice — it's the headline. Recovery evidence
   // (maxed RPE OR sustained-elevated RHR) routes "stuck" to a back-off, not "handle it".
-  if (plateau && !recoveryFlag) {
+  // Skipped on a layoff — flat numbers across a gap aren't a stall.
+  if (plateau && !recoveryFlag && !onLayoff) {
     const stuck = stalls + 1;
     if (rpeCeiling || rhrElevated) {
       const why = rpeCeiling && rhrElevated ? `RPE's maxed (${avgRpe.toFixed(1)}) and ${rhrPhrase}`
@@ -496,12 +505,18 @@ export function buildProgressionGuidance(
     } else {
       coachNote = `${stuck} sessions at ${topWeight}×${minRepAtTop} — quit spinning your wheels. Add ${inc} lbs or chase a rep. Handle business.`;
     }
-  } else if (rhrElevated && liftSlipping && !recoveryFlag) {
+  } else if (rhrElevated && liftSlipping && !recoveryFlag && !onLayoff) {
     // Slipping + sustained-elevated RHR, no formal stall yet — the corroborated back-off.
     coachNote = `This lift's sliding and ${rhrPhrase} — back off and bank some recovery. Repeat ${sxr(setCount, minRepAtTop)} at ${topWeight} lbs at most.`;
-  } else if (rhrElevated && !liftProgressing && !caution) {
+  } else if (rhrElevated && !liftProgressing && !caution && !onLayoff) {
     // Neutral session but RHR is up — a quiet watch, don't change the prescription.
     caution = `Heads up — ${rhrPhrase}. Keep an eye on recovery this week.`;
+  }
+  // Coming back from a layoff: re-anchor light and climb fast (takes precedence over the
+  // normal progression call, but a fresh recovery check-in still wins below).
+  if (onLayoff && !recoveryFlag) {
+    const startW = round5(topWeight * (1 - layoffPct));
+    coachNote = `${Math.round(weeksOff)} weeks off this lift — start light (~${startW} lbs) and climb fast. The muscle remembers; wake it up with an honest top set.`;
   }
   // Recovery check-in context always wins — conservative and complete on its own.
   if (recoveryFlag) coachNote = recoveryFlag;
