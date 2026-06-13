@@ -53,9 +53,17 @@ export interface ProgressionGuidance {
   // "be careful today" (RPE ceiling, high soreness, drained check-in). Advisory only.
   caution: string | null;
   // The progression suggestion in a brief COACHING VOICE — one or two plain-language
-  // sentences (primary move + an alternative), e.g. "Aim for 3×6 at 185 lbs this week,
-  // or 4 sets of 4 would work too." This is what the logger shows now (no tap-to-apply).
+  // sentences (primary move + an alternative). Used as the expanded "why" / rationale.
   coachNote: string | null;
+  // ── structured output (spec §11) — drives the progressive-disclosure card (§12) ──
+  state: 'A' | 'B' | 'C' | 'D' | 'E' | 'F' | 'G' | 'H' | 'I' | null; // §5.2 (null = no history)
+  severity: 'green' | 'yellow' | 'red';      // left-accent colour, glanceable
+  actionLabel: string;                        // chip, ≤2 words: "Hold" / "Add weight" / "Back off"
+  prescription: string;                       // collapsed bold line, short: "Repeat 105 × 6"
+  reason: string;                             // collapsed sub-line, ≤~8 words
+  confidence: 'high' | 'medium' | 'low';      // data completeness (§10) — gates voice
+  register: 'normal' | 'strong' | 'blunt';    // escalation (§2.2)
+  dataUsed: string[];                         // ["Last 3 exposures", "Avg RPE 9.4", "Est. 1RM flat"]
 }
 
 // Post-session check-in from the lifter's most recent session (all fields optional —
@@ -238,6 +246,14 @@ export function computeRhrFlag(restingHr: { date: number; value: number }[] | nu
   return { elevated: delta >= 7, delta, recent: Math.round(recentMean), baseline: Math.round(baselineMean) };
 }
 
+// Structured-output defaults for the no-history / baseline state (§12.2: a quiet baseline
+// tag, no real call yet). Spread into the early returns so the card always has its fields.
+const EMPTY_CALL = {
+  state: null, severity: 'green' as const, actionLabel: 'Baseline',
+  prescription: '', reason: 'Log clean sets — targets start building',
+  confidence: 'low' as const, register: 'normal' as const, dataUsed: [] as string[],
+};
+
 // ─── The engine — builds in-session guidance for one exercise ──────────────────
 export function buildProgressionGuidance(
   sessions: ExerciseHistory[],
@@ -268,13 +284,13 @@ export function buildProgressionGuidance(
   }
 
   if (!sessions || sessions.length === 0) {
-    return { lastSummary: null, repRange: range, targets: [], plateau: null, caution: null, coachNote: null };
+    return { lastSummary: null, repRange: range, targets: [], plateau: null, caution: null, coachNote: null, ...EMPTY_CALL };
   }
 
   const last = sessions[0];
   const sets = (last.sets || []).filter(s => (s.weight || 0) > 0 && s.reps > 0);
   if (sets.length === 0) {
-    return { lastSummary: null, repRange: range, targets: [], plateau: null, caution: null, coachNote: null };
+    return { lastSummary: null, repRange: range, targets: [], plateau: null, caution: null, coachNote: null, ...EMPTY_CALL };
   }
 
   const lastSummary = sets.map(s => `${s.weight}×${s.reps}${sumClusters(s) ? ` +${(s.cluster_reps || []).join('·')}` : ''}`).join(' · ');
@@ -324,7 +340,13 @@ export function buildProgressionGuidance(
         ? `Add a rep to each cluster → ${W(topWeight)} × ${mainR} + ${bumped.join('·')}, or add load if those move fast.`
         : `Add load → ${W(round5(topWeight + incC))} × ${mainR} + ${cstr}.`;
     }
-    return { lastSummary, repRange: range, targets, plateau: detectPlateau(sessions, profile), caution: cCaution, coachNote: recoveryFlag || cNote };
+    return {
+      lastSummary, repRange: range, targets, plateau: detectPlateau(sessions, profile), caution: cCaution, coachNote: recoveryFlag || cNote,
+      state: 'A', severity: (cRpe != null && cRpe >= 9.5) ? 'yellow' : 'green', actionLabel: 'Clusters',
+      prescription: '', reason: '',
+      confidence: (sessions.length >= 3 ? 'high' : sessions.length >= 2 ? 'medium' : 'low'),
+      register: 'normal', dataUsed: [`Last ${Math.min(sessions.length, 4)} exposures`, 'Cluster work'],
+    };
   }
   const setsAtTop = sets.filter(s => (s.weight || 0) === topWeight);
   const repsAtTop = setsAtTop.map(s => s.reps);
@@ -521,6 +543,69 @@ export function buildProgressionGuidance(
   // Recovery check-in context always wins — conservative and complete on its own.
   if (recoveryFlag) coachNote = recoveryFlag;
 
+  // ── Structured call (spec §11) — the card's chip/severity/prescription, derived from
+  // the same signals in cascade priority. coachNote above is the expanded "why" (rationale).
+  const nextRepV = Math.min(maxRepAtTop + 1, range.max);
+  const addLoadW = round5(topWeight + inc);
+  let state: ProgressionGuidance['state'] = 'A';
+  let severity: ProgressionGuidance['severity'] = 'green';
+  let actionLabel = 'Add weight';
+  let prescription = `${addLoadW} × ${range.min}`;
+  let reason = 'You owned the reps';
+  if (recoveryFlag) {
+    state = 'E'; severity = 'yellow'; actionLabel = 'Hold';
+    prescription = `Match ${topWeight} × ${minRepAtTop}`; reason = 'You flagged rough recovery';
+  } else if (onLayoff) {
+    state = 'E'; severity = 'yellow'; actionLabel = 'Ease in';
+    prescription = `Start ~${round5(topWeight * (1 - layoffPct))} lbs`; reason = `${Math.round(weeksOff)} weeks off — climb fast`;
+  } else if (plateau && (rpeCeiling || rhrElevated)) {
+    state = 'I'; severity = 'red'; actionLabel = 'Back off';
+    prescription = `Lighter week, RPE 7–8`; reason = 'Stuck and under-recovered';
+  } else if (plateau) {
+    state = 'D'; severity = 'yellow'; actionLabel = 'Add weight';
+    prescription = `${addLoadW} × ${minRepAtTop}`; reason = `${stalls + 1} sessions stuck — break it`;
+  } else if (liftSlipping) {
+    state = 'E'; severity = rhrElevated ? 'red' : 'yellow'; actionLabel = 'Back off';
+    prescription = `Repeat ${topWeight} × ${minRepAtTop}`; reason = 'Est. 1RM sliding';
+  } else if (trend === 'progressing' && (rpeCeiling || rpeHigh)) {
+    state = 'B'; severity = 'green'; actionLabel = 'Small push';
+    prescription = `${topWeight} × ${minRepAtTop + 1}`; reason = 'Earned, but getting pricey';
+  } else if (trend === 'progressing') {
+    state = 'A'; severity = 'green'; actionLabel = 'Add weight';
+    prescription = `${addLoadW} × ${range.min}`; reason = 'You owned the reps';
+  } else if (trend === 'flat' && (rpeCeiling || rpeHigh)) {
+    state = 'D'; severity = 'yellow'; actionLabel = 'Hold';
+    prescription = `Repeat ${topWeight} × ${minRepAtTop}`; reason = 'Hard, but not moving';
+  } else if (trend === 'flat') {
+    state = 'C'; severity = 'green'; actionLabel = 'Push';
+    prescription = `${topWeight} × ${nextRepV}`; reason = 'Too comfortable — chase reps';
+  } else {
+    state = 'A'; severity = 'green'; actionLabel = 'Add reps';
+    prescription = `${topWeight} × ${nextRepV}`; reason = 'Beat the logbook';
+  }
+  if (cls.heavyBarbell && actionLabel === 'Add weight' && severity === 'green') actionLabel = 'Add reps'; // reps-first on heavy bar
+
+  const hasRpe = avgRpe != null;
+  // Confidence (§10): gates how strongly we speak + whether we may claim a stall.
+  const confidence: ProgressionGuidance['confidence'] =
+    sessions.length >= 3 && hasRpe ? 'high' : sessions.length >= 2 ? 'medium' : 'low';
+  // Register escalation (§2.2): Strong when a yellow/red state has persisted; Blunt only
+  // when they've been told and kept grinding (stuck + maxed RPE). Never below medium confidence.
+  let register: ProgressionGuidance['register'] = 'normal';
+  if (confidence !== 'low') {
+    if (severity !== 'green' && (stalls >= 2 || liftSlipping)) register = 'strong';
+    if (stalls >= 2 && rpeCeiling) register = 'blunt';
+  }
+  const trendWord = trend === 'progressing' ? 'Est. 1RM climbing'
+    : trend === 'slipping' ? 'Est. 1RM sliding'
+    : trend === 'flat' ? 'Est. 1RM flat' : 'Trend still forming';
+  const dataUsed = [
+    `Last ${Math.min(sessions.length, 4)} exposure${sessions.length === 1 ? '' : 's'}`,
+    hasRpe ? `Avg RPE ${avgRpe.toFixed(1)}` : 'No RPE logged',
+    trendWord,
+  ];
+  if (rhrElevated && rhr) dataUsed.push(`RHR +${rhr.delta} bpm`);
+
   return {
     lastSummary,
     repRange: range,
@@ -528,6 +613,7 @@ export function buildProgressionGuidance(
     plateau,
     caution,
     coachNote,
+    state, severity, actionLabel, prescription, reason, confidence, register, dataUsed,
   };
 }
 

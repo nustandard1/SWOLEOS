@@ -1397,34 +1397,50 @@ export default function WorkoutLoggerScreen() {
               <Text style={s.cueLine}>{item.prescription}</Text>
             ) : null}
 
-            {/* Coaching note — ONE brief suggestion in plain voice (primary move + an
-                alternative). No tap-to-apply: the inputs already pre-fill from last
-                session; this is the advice layer. A stall flag tints it. */}
+            {/* Coaching call — progressive disclosure (spec §12). Collapsed: action chip +
+                severity accent + the prescription + a short reason. Tap → the "why", the
+                data it used, and confidence. No apply buttons — the inputs already pre-fill. */}
             {(() => {
               const g = item.guidance;
-              const note = g?.coachNote;
-              const plateau = g?.plateau;
-              const flagged = plateau?.level === 'flag';
-              if (!note && !plateau) {
+              if (!g || (!g.coachNote && !g.prescription)) {
+                // First exposure / no data yet — a quiet baseline tag, not a full card.
                 return (
                   <View style={s.targetPlaceholderRow}>
-                    <Text style={s.targetPlaceholderText}>Your progression suggestion appears after your first logged session.</Text>
+                    <Text style={s.targetPlaceholderText}>Baseline — log clean sets and your targets start building.</Text>
                   </View>
                 );
               }
-              const tint = flagged ? colors.statusLow : plateau ? colors.statusMid : colors.acc;
-              // The coachNote already carries the stall message in its own voice (blunt
-              // for a real plateau), so it stands alone — the plateau just sets the tint.
-              const primary = note || plateau?.message;
+              const sev = g.severity || 'green';
+              const sevColor = sev === 'red' ? colors.statusLow : sev === 'yellow' ? colors.statusMid : colors.statusGood;
+              const sevDark = sev === 'red' ? '#3A0D0A' : sev === 'yellow' ? '#2B1605' : '#06210F';
+              const confColor = g.confidence === 'high' ? colors.statusGood : g.confidence === 'medium' ? colors.muted : colors.dim;
+              const open = !!item.coachOpen;
+              const toggle = () => setExercises(p => p.map((e, i) => i === exIdx ? { ...e, coachOpen: !e.coachOpen } : e));
               return (
-                <View style={[s.coachBlock, flagged && s.coachBlockFlag, plateau && !flagged && s.coachBlockWarn]}>
-                  <MaterialCommunityIcons
-                    name={plateau ? (flagged ? 'alert' : 'trending-down') : 'whistle'}
-                    size={15}
-                    color={tint}
-                    style={{ marginTop: 1 }}
-                  />
-                  <Text style={[s.coachText, flagged && { color: colors.dangerTxt }]}>{primary}</Text>
+                <View style={[s.coachCard, { borderLeftColor: sevColor }]}>
+                  <TouchableOpacity style={s.coachHead} activeOpacity={0.7} onPress={toggle}>
+                    <View style={[s.coachChip, { backgroundColor: sevColor }]}>
+                      <Text style={[s.coachChipText, { color: sevDark }]}>{(g.actionLabel || '').toUpperCase()}</Text>
+                    </View>
+                    <Text style={s.coachRx} numberOfLines={1}>{g.prescription || g.coachNote}</Text>
+                    <MaterialCommunityIcons name={open ? 'chevron-up' : 'chevron-down'} size={18} color={colors.dim} />
+                  </TouchableOpacity>
+                  {g.reason ? <Text style={s.coachReason} numberOfLines={1}>{g.reason}</Text> : null}
+                  {open && (
+                    <View style={s.coachExp}>
+                      {g.coachNote ? (
+                        <Text style={s.coachWhy}><Text style={s.coachWhyLabel}>Why — </Text>{g.coachNote}</Text>
+                      ) : null}
+                      {g.dataUsed?.length ? (
+                        <View style={s.coachDataRow}>
+                          {g.dataUsed.map((d, di) => (
+                            <View key={di} style={s.coachDataChip}><Text style={s.coachDataChipText}>{d}</Text></View>
+                          ))}
+                        </View>
+                      ) : null}
+                      <Text style={s.coachConf}>CONFIDENCE: <Text style={{ color: confColor }}>{(g.confidence || 'low').toUpperCase()}</Text></Text>
+                    </View>
+                  )}
                 </View>
               );
             })()}
@@ -1885,13 +1901,20 @@ const s = StyleSheet.create({
   moreTargets: { alignSelf: 'flex-start', paddingTop: 6, paddingBottom: 1 },
   moreTargetsText: { fontFamily: fonts.bodySemi, fontSize: 9, color: colors.dim, letterSpacing: 1 },
 
-  // Coaching note — one brief suggestion in plain voice (icon carries the accent, the
-  // sentence reads clean and near-white so it feels like a coach talking, not a chip).
-  coachBlock: { flexDirection: 'row', alignItems: 'flex-start', gap: 9, paddingHorizontal: space.md, paddingVertical: 11, borderTopWidth: 1.5, borderTopColor: colors.accDim, backgroundColor: colors.accSurf },
-  coachBlockWarn: { borderTopColor: 'rgba(255,138,61,0.34)' },
-  coachBlockFlag: { borderTopColor: 'rgba(255,122,107,0.34)' },
-  coachText: { flex: 1, fontFamily: fonts.body, fontSize: 13, color: colors.text, lineHeight: 19 },
-  coachPlateau: { fontFamily: fonts.bodySemi, fontSize: 11, color: '#D9A86A', lineHeight: 16, marginTop: 5 },
+  // Coaching call — progressive-disclosure card (§12). Severity = left accent bar.
+  coachCard: { borderTopWidth: 1.5, borderTopColor: '#2A2A2A', borderLeftWidth: 3, backgroundColor: '#161514' },
+  coachHead: { flexDirection: 'row', alignItems: 'center', gap: 9, paddingHorizontal: space.md, paddingTop: 10, paddingBottom: 3 },
+  coachChip: { paddingHorizontal: 8, paddingVertical: 3 },
+  coachChipText: { fontFamily: fonts.display, fontSize: 11, letterSpacing: 0.6, textTransform: 'uppercase' },
+  coachRx: { flex: 1, fontFamily: fonts.bodySemi, fontSize: 14, color: colors.text },
+  coachReason: { fontFamily: fonts.body, fontSize: 12, color: '#C9A86A', paddingHorizontal: space.md, paddingBottom: 10 },
+  coachExp: { paddingHorizontal: space.md, paddingTop: 10, paddingBottom: 12, borderTopWidth: 1, borderTopColor: '#232323' },
+  coachWhy: { fontFamily: fonts.body, fontSize: 12.5, color: '#D9D4CC', lineHeight: 18 },
+  coachWhyLabel: { fontFamily: fonts.bodySemi, color: colors.muted },
+  coachDataRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 10 },
+  coachDataChip: { borderWidth: 1, borderColor: colors.line2, paddingHorizontal: 7, paddingVertical: 3 },
+  coachDataChipText: { fontFamily: fonts.bodySemi, fontSize: 9.5, color: colors.muted, letterSpacing: 0.5 },
+  coachConf: { fontFamily: fonts.bodySemi, fontSize: 10, color: colors.dim, letterSpacing: 1, marginTop: 9 },
 
   // Per-set LAST column — faint reference, never competes with the live inputs.
   lastCell: { width: 50, alignItems: 'center', justifyContent: 'center' },
