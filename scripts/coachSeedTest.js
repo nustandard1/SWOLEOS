@@ -91,3 +91,35 @@ for (const sc of scenarios) {
   console.log(`    e1RM (newest→oldest): ${e1}`);
   console.log(`    OLD: ${v(detectOLD(sc.s, false))}    NEW: ${v(detectNEW(sc.s, false))}    [expect: ${sc.expect}]\n`);
 }
+
+// ── #2 RHR readiness flag (must match computeRhrFlag in intelligence.ts) ─────────
+const DAY = 86400000;
+function computeRhrFlag(restingHr) {
+  if (!restingHr || restingHr.length < 5) return null;
+  const now = Date.now();
+  const recent = restingHr.filter(r => now - r.date <= 3 * DAY);
+  const baseline = restingHr.filter(r => { const age = now - r.date; return age > 3 * DAY && age <= 17 * DAY; });
+  if (recent.length < 2 || baseline.length < 3) return null;
+  const mean = a => a.reduce((s, b) => s + b.value, 0) / a.length;
+  const delta = Math.round(mean(recent) - mean(baseline));
+  return { elevated: delta >= 7, delta };
+}
+// build a series: recent 3-day readings + baseline (days 4–16) readings
+const series = (recentVals, baseVals) => {
+  const now = Date.now();
+  const out = [];
+  recentVals.forEach((val, i) => out.push({ date: now - (i + 1) * DAY, value: val }));      // days 1–3
+  baseVals.forEach((val, i) => out.push({ date: now - (i + 5) * DAY, value: val }));         // days 5+
+  return out;
+};
+const rhrCases = [
+  { name: 'Elevated +8 (sustained) — recovery flag', s: series([66, 67, 65], [58, 59, 58, 57, 59]), expect: 'elevated' },
+  { name: 'Normal — at baseline', s: series([58, 59, 57], [58, 59, 58, 57, 59]), expect: 'not elevated' },
+  { name: 'Noise +4 — below the 7 bpm bar', s: series([62, 63, 61], [58, 59, 58, 57, 59]), expect: 'not elevated' },
+  { name: 'Thin data (3 readings) — null', s: series([66], [58, 59]), expect: 'null' },
+];
+console.log('— #2 RHR flag (recent 3-day mean vs ~2-week baseline, ≥7 bpm = elevated) —\n');
+for (const c of rhrCases) {
+  const f = computeRhrFlag(c.s);
+  console.log(`• ${c.name}\n    → ${f ? `elevated=${f.elevated} delta=${f.delta >= 0 ? '+' : ''}${f.delta}` : 'null'}    [expect: ${c.expect}]\n`);
+}

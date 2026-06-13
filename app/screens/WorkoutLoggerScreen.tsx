@@ -17,7 +17,8 @@ import { BlurView } from 'expo-blur';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { supabase } from '../lib/supabase';
-import { getLastSession, getExerciseHistory, buildProgressionGuidance, formatSessionDate } from '../lib/intelligence';
+import { getLastSession, getExerciseHistory, buildProgressionGuidance, computeRhrFlag, formatSessionDate } from '../lib/intelligence';
+import { getRecoveryMetrics } from '../lib/health';
 import CountUp from '../components/CountUp';
 import * as Haptics from 'expo-haptics';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -569,6 +570,7 @@ export default function WorkoutLoggerScreen() {
   const [saving, setSaving]           = useState(false);
   const profileRef                     = useRef({}); // calibration profile for the engine
   const checkinRef                     = useRef(null); // last session's post-session check-in (optional)
+  const rhrRef                         = useRef(null); // resting-HR readiness flag (Apple Health; optional)
 
   // Keypad state
   const [sel, setSel] = useState(null); // {exIdx, setIdx, field}
@@ -666,6 +668,12 @@ export default function WorkoutLoggerScreen() {
       if (lastCk && (lastCk.session_rpe != null || lastCk.soreness != null || lastCk.readiness != null)) {
         checkinRef.current = lastCk;
       }
+      // Resting-HR readiness (Apple Health) — confirmatory recovery signal for the engine.
+      // Optional: no HealthKit / not enough history → stays null and the engine ignores it.
+      try {
+        const rec = await getRecoveryMetrics();
+        rhrRef.current = computeRhrFlag(rec?.restingHr);
+      } catch (e) { /* health unavailable — engine runs fine on training data alone */ }
       loadExercises(user.id);
       if (editSessionId) loadEditSession();
       else if (templateSessionId) loadTemplateSession(user.id);
@@ -726,7 +734,7 @@ export default function WorkoutLoggerScreen() {
       const ex = row.exercises;
       const sessions = await getExerciseHistory(uid, ex.id, 4);
       const history = sessions[0] || null;
-      const guidance = buildProgressionGuidance(sessions, profileRef.current, ex, checkinRef.current);
+      const guidance = buildProgressionGuidance(sessions, profileRef.current, ex, checkinRef.current, rhrRef.current);
       const sets = Array.from({ length: row.target_sets || 3 }, (_, i) => mkSet(ghostFor(history, i)));
       const dbl = row.progression_type === 'double';
       const target = row.target_rep_min && row.target_rep_max
@@ -1111,7 +1119,7 @@ export default function WorkoutLoggerScreen() {
   async function addExercise(exercise) {
     const sessions = userId ? await getExerciseHistory(userId, exercise.id, 4) : [];
     const history = sessions[0] || null;
-    const guidance = buildProgressionGuidance(sessions, profileRef.current, exercise, checkinRef.current);
+    const guidance = buildProgressionGuidance(sessions, profileRef.current, exercise, checkinRef.current, rhrRef.current);
     const sets = [0, 1, 2].map(i => mkSet(ghostFor(history, i)));
     setExercises(prev => [...prev, { exercise, sets, history, guidance, target: null, note: '', showAdv: false }]);
     setShowPicker(false);
