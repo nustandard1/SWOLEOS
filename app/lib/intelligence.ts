@@ -195,6 +195,21 @@ function detectPlateau(sessions: ExerciseHistory[], profile: CalibrationProfile)
   return null;
 }
 
+// Performance trend (spec §4.3): the latest exposure's best e1RM vs a 3-exposure ROLLING
+// average, judged against the ±4% band. Because e1RM is RPE-adjusted, rep gains AND
+// effort-quality both fall out of one number — same work at a LOWER RPE reads as progress,
+// the SAME numbers at a higher RPE reads as a slip. Far less jumpy than a single-session delta.
+export type Trend = 'progressing' | 'flat' | 'slipping' | 'unclear';
+function classifyTrend(sessions: ExerciseHistory[]): Trend {
+  if (!sessions || sessions.length < 2) return 'unclear';
+  const cur = bestE1rm(sessions[0]);
+  const prior = rollingE1rm(sessions, 1);
+  if (cur <= 0 || prior <= 0) return 'unclear';
+  if (cur > prior * (1 + NOISE_BAND)) return 'progressing';
+  if (cur < prior * (1 - NOISE_BAND)) return 'slipping';
+  return 'flat';
+}
+
 // Resting-HR readiness flag (spec §9.2 / §4.7). Compares a recent 3-day mean against a
 // trailing baseline (~3–17 days back, uncoupled from the acute window). A sustained ≥7 bpm
 // rise over baseline is a meaningful recovery signal (3–4 bpm is noise). CONFIRMATORY ONLY —
@@ -356,13 +371,12 @@ export function buildProgressionGuidance(
   const rpeTrend = (rpeCeiling || rpeHigh) && priorRpes.length > 0 && priorRpes.every(r => r >= 8.5);
   const rpeOneOff = (rpeCeiling || rpeHigh) && (priorRpes.length === 0 || priorRpes.some(r => r < 8.5));
 
-  // Is this lift slipping? RPE-adjusted best e1RM declined >2% vs the prior session.
-  const eNow = bestE1rm(last);
-  const ePrev = sessions[1] ? bestE1rm(sessions[1]) : 0;
-  const liftSlipping = ePrev > 0 && eNow > 0 && eNow < ePrev * 0.98;
-  // Are they actually getting stronger? (e1RM up vs the prior session.) High RPE WITH
-  // progress is earned — note the intensity, never fault the progress.
-  const liftProgressing = ePrev > 0 && eNow > ePrev * 1.005;
+  // Trend off the 3-exposure ROLLING average (spec §4.3), not a single-session delta —
+  // the stronger predictor, and it's the same band the stall logic uses.
+  const trend = classifyTrend(sessions);
+  const liftSlipping = trend === 'slipping';
+  // Getting stronger? High RPE WITH progress is earned — note the intensity, never fault it.
+  const liftProgressing = trend === 'progressing';
 
   const flagCount = (recoveryFlag ? 1 : 0) + (liftSlipping ? 1 : 0);
   // hold = repeat is the target · small = progression in smallest increments · push = full menu

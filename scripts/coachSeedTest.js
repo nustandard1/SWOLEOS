@@ -46,6 +46,17 @@ function detectNEW(sessions, advanced) {
   return null;
 }
 
+// NEW: rolling-average trend classifier (#3 — must match classifyTrend in intelligence.ts)
+function classifyTrend(sessions) {
+  if (!sessions || sessions.length < 2) return 'unclear';
+  const cur = bestE1rm(sessions[0].sets);
+  const prior = rollingE1rm(sessions, 1);
+  if (cur <= 0 || prior <= 0) return 'unclear';
+  if (cur > prior * (1 + NOISE_BAND)) return 'progressing';
+  if (cur < prior * (1 - NOISE_BAND)) return 'slipping';
+  return 'flat';
+}
+
 // ── OLD code (for the before/after comparison) ─────────────────────────────────
 function countStallsOLD(sessions) {
   let st = 0;
@@ -89,7 +100,7 @@ for (const sc of scenarios) {
   const e1 = sc.s.map(x => bestE1rm(x.sets).toFixed(1)).join(' · ');
   console.log(`• ${sc.name}`);
   console.log(`    e1RM (newest→oldest): ${e1}`);
-  console.log(`    OLD: ${v(detectOLD(sc.s, false))}    NEW: ${v(detectNEW(sc.s, false))}    [expect: ${sc.expect}]\n`);
+  console.log(`    OLD: ${v(detectOLD(sc.s, false))}    NEW: ${v(detectNEW(sc.s, false))}    trend: ${classifyTrend(sc.s)}    [expect: ${sc.expect}]\n`);
 }
 
 // ── #2 RHR readiness flag (must match computeRhrFlag in intelligence.ts) ─────────
