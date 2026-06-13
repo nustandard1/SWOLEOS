@@ -9,7 +9,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import SwipeSheet from '../components/SwipeSheet';
 import { BlurView } from 'expo-blur';
 import { isHealthAvailable, getBodyMetrics, requestHealthPermissions } from '../lib/health';
-import { getMergedBody } from '../lib/trendPairs';
+import { getMergedBody, accountCreatedMs } from '../lib/trendPairs';
 import { useNavigation } from '@react-navigation/native';
 import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
@@ -138,8 +138,9 @@ export default function ProfileScreen() {
     // Lean mass (Apple Health) — weekly averages for the trend chart. Empty/zeros when
     // Health is unavailable or unconnected; the chart explains itself in that case.
     try {
-      // Merged body data (Apple Health + manual weigh-ins), last 8 weeks.
-      const sinceMs = Date.now() - 56 * 86400000;
+      // Merged body data (Apple Health + manual weigh-ins), clamped to when they joined
+      // (no charting weeks before the account existed; the latest reading is still kept).
+      const sinceMs = await accountCreatedMs();
       const { leanMass } = await getMergedBody(user.id, sinceMs);
       setLeanHasData(!!(leanMass && leanMass.length));
       if (leanMass?.length) {

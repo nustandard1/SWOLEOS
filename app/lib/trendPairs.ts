@@ -304,13 +304,29 @@ export function buildTrendViews({ sessions = [], body = null, phase = null }) {
   return { windowWeeks: WEEKS, views };
 }
 
-// Health samples only count from the day the account was created — people often
-// have months of scale history that predates SWOLE/OS, and a trend that starts
-// before the training data exists tells a story the app can't corroborate.
-export function clampBodyMetrics(body, sinceMs) {
+// Health samples only count from the day the account was created — people often have
+// months of scale history that predates SWOLE/OS, and charting weeks the lifter wasn't
+// even in the app (with no training to corroborate) tells a story we can't back. We DO
+// keep the single most-recent reading so the lifter's CURRENT weight/BF% still shows.
+export function clampBodyMetrics(body, sinceMs, keepLatest = true) {
   if (!body || !sinceMs) return body;
-  const clip = (arr) => (arr || []).filter((s) => s.date >= sinceMs);
+  const clip = (arr) => {
+    const all = arr || [];
+    const inWindow = all.filter((s) => s.date >= sinceMs);
+    if (inWindow.length || !keepLatest || !all.length) return inWindow;
+    return [[...all].sort((a, b) => b.date - a.date)[0]]; // just the latest, for the current value
+  };
   return { weight: clip(body.weight), leanMass: clip(body.leanMass), bodyFat: clip(body.bodyFat) };
+}
+
+// The clamp boundary = the day the account was created (auth user). Falls back to ~8 weeks
+// if that's unavailable. Used so trends never reach back before the lifter joined.
+export async function accountCreatedMs() {
+  try {
+    const { data } = await supabase.auth.getUser();
+    const c = data?.user?.created_at;
+    return c ? new Date(c).getTime() : (Date.now() - 56 * DAY);
+  } catch (e) { return Date.now() - 56 * DAY; }
 }
 
 // Merged body-comp series: Apple Health (clamped) + manual weigh-ins (body_metrics),
@@ -358,7 +374,7 @@ export async function getTrendViews(userId) {
     supabase.from('users').select('current_phase').eq('id', userId).maybeSingle(),
     supabase.auth.getUser(),
   ]);
-  const body = await getMergedBody(userId, Date.now() - 56 * DAY);
+  const body = await getMergedBody(userId, await accountCreatedMs());
   return buildTrendViews({
     sessions: sessRes.data || [],
     body,
@@ -671,7 +687,7 @@ export async function getIntelligence(userId) {
   const phase = userRes.data?.current_phase || null;
   const plannedPerWeek = (tmplRes.data?.[0]?.template_sessions || []).length;
 
-  const body = await getMergedBody(userId, Date.now() - 56 * DAY);
+  const body = await getMergedBody(userId, await accountCreatedMs());
 
   const { views } = buildTrendViews({ sessions, body, phase });
   const score = buildScore({ sessions, plannedPerWeek, phase });
