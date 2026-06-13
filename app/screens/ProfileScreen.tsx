@@ -15,6 +15,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { supabase } from '../lib/supabase';
 import { colors, fonts, space } from '../theme/forge';
 import { triggerReplayOnboarding, triggerPreviewPaywall } from '../lib/devBus';
+import { seedCoachData, clearCoachSeed } from '../lib/devSeed';
 import { resolveSplitDef } from '../lib/splitDefinitions';
 import * as Updates from 'expo-updates';
 
@@ -535,6 +536,25 @@ export default function ProfileScreen() {
         {SHOW_PREVIEW_TOOLS && (
           <TouchableOpacity style={s.devBtn} onPress={triggerPreviewPaywall}>
             <Text style={s.devBtnText}>⟳ PREVIEW PAYWALL</Text>
+          </TouchableOpacity>
+        )}
+        {SHOW_PREVIEW_TOOLS && (
+          <TouchableOpacity style={s.devBtn} onPress={async () => {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (!user) return;
+            const res = await seedCoachData(user.id);
+            if (res?.error) { Alert.alert('Seed failed', res.error); return; }
+            Alert.alert('Coach data seeded', `Start an Empty Session and add these lifts to see the states:\n\n${(res.summary || []).join('\n')}`);
+          }}>
+            <Text style={s.devBtnText}>⟳ SEED COACH DATA</Text>
+          </TouchableOpacity>
+        )}
+        {SHOW_PREVIEW_TOOLS && (
+          <TouchableOpacity style={s.devBtn} onPress={async () => {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) { await clearCoachSeed(user.id); Alert.alert('Cleared', 'Seeded coach sessions removed.'); }
+          }}>
+            <Text style={s.devBtnText}>⟳ CLEAR COACH SEED</Text>
           </TouchableOpacity>
         )}
 
