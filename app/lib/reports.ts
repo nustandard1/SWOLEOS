@@ -16,7 +16,7 @@ export interface Trends {
   comebacks: { exercise: string }[];                      // broke a plateau this week
   muscleVolumeTrends: { muscle: string; dir: 'up' | 'down' | 'flat'; deltaPct: number }[];
   // per-muscle volume + STRENGTH direction together (progression is the real metric, not volume alone)
-  muscleScores: { muscle: string; sets: number; volumeDir: 'up' | 'down' | 'flat'; strengthDir: 'up' | 'down' | 'flat'; volumePct: number; strengthPct: number }[];
+  muscleScores: { muscle: string; sets: number; weekSets: number; landmark: 'under' | 'productive' | 'high' | 'excess'; volumeDir: 'up' | 'down' | 'flat'; strengthDir: 'up' | 'down' | 'flat'; volumePct: number; strengthPct: number }[];
   frequency: { muscle: string; perWeek: number }[];       // avg times/wk a muscle is trained (last 4wk)
   // adherence/planned/fulfilled present only when an active template defines a schedule.
   // chronicShortfall = came up short on planned frequency for 2+ of the most recent
@@ -489,7 +489,11 @@ export async function getWeeklyReport(userId: string, anchorOffset = 0): Promise
       volumePct = Math.round(((tv - pv) / pv) * 100);
       volumeDir = volumePct > 10 ? 'up' : volumePct < -10 ? 'down' : 'flat';
     }
-    return { muscle: m.muscle, sets: m.sets, volumeDir, strengthDir, volumePct, strengthPct };
+    // Volume-vs-landmark band (spec §4.5): this WEEK's hard sets against MEV/MAV bands.
+    // < 6 = under-dosed floor · 6–16 = productive (MEV→MAV) · 17–25 = diminishing · >25 = likely junk.
+    const weekSets = wkNow.muscleSets?.[m.muscle] || 0;
+    const landmark: any = weekSets < 6 ? 'under' : weekSets <= 16 ? 'productive' : weekSets <= 25 ? 'high' : 'excess';
+    return { muscle: m.muscle, sets: m.sets, weekSets, landmark, volumeDir, strengthDir, volumePct, strengthPct };
   });
 
   // Frequency: avg sessions/week per muscle over last 4 weeks
@@ -673,6 +677,18 @@ export async function getWeeklyReport(userId: string, anchorOffset = 0): Promise
   const weakSets = weakMuscles.reduce((a, m) => a + (muscleMap[m]?.sets || 0), 0);
   if (weakMuscles.length && weakSets < 6) {
     insights.push({ tone: 'warn', text: `Your weak point (${profile.weakest_part}) only got ${weakSets} working sets this week. If it's a priority, it needs more volume — that's likely why it lags.` });
+  }
+  // Training-load watch (spec §4.8 — borrows the acute:chronic structure, never shown as
+  // "ACWR"). Acute = this week's tonnage; chronic = the prior 3-week norm. A >1.5 jump
+  // outpaces recovery. Internal language only — surfaced as a plain "watch" nudge.
+  if (weekly.length >= 4) {
+    const acute = weekly[weekly.length - 1].volume;
+    const prior = weekly.slice(-4, -1).map(w => w.volume).filter(v => v > 0);
+    const chronic = prior.length ? prior.reduce((a, b) => a + b, 0) / prior.length : 0;
+    if (chronic > 0 && acute / chronic > 1.5) {
+      const pct = Math.round((acute / chronic - 1) * 100);
+      insights.push({ tone: 'warn', text: `Training volume jumped ${pct}% above your recent norm this week. Big spikes outrun recovery — make sure sleep and intensity can back it up, or level it off.` });
+    }
   }
 
   // ─── Recommendations ───

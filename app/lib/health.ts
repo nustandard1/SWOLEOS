@@ -94,12 +94,45 @@ export function deriveLean(weight, bodyFat) {
   return out;
 }
 
-// Recovery signals (for making the Recovery grade real, later).
+// SleepAnalysis is CATEGORY data (not quantity). Defensive: any API/shape mismatch →
+// empty, so the engine just degrades (sleep is confirmatory-only). NEEDS ON-DEVICE
+// VERIFICATION of the value enums across iOS versions.
+async function categorySamples(identifier) {
+  const k = hk();
+  if (!k || !k.queryCategorySamples) return [];
+  try {
+    const s = await k.queryCategorySamples(identifier, { limit: 1000 });
+    return (s || [])
+      .map((x) => ({ start: new Date(x.startDate).getTime(), end: new Date(x.endDate).getTime(), value: x.value }))
+      .filter((x) => x.end > x.start);
+  } catch (e) { return []; }
+}
+
+// Recent nightly asleep hours. HKCategoryValueSleepAnalysis: 0=inBed, 2=awake are NOT
+// asleep; 1/3/4/5 (asleep* variants across iOS versions) count. Attribute each block to
+// the morning it ended. Returns [{date, hours}] most-recent-first.
+export async function getSleepNights() {
+  if (!isHealthAvailable()) return [];
+  const samples = await categorySamples('HKCategoryTypeIdentifierSleepAnalysis');
+  const asleep = samples.filter((s) => s.value !== 0 && s.value !== 2);
+  const byNight = {};
+  for (const s of asleep) {
+    const d = new Date(s.end); d.setHours(0, 0, 0, 0);
+    const key = d.getTime();
+    byNight[key] = (byNight[key] || 0) + (s.end - s.start);
+  }
+  return Object.entries(byNight)
+    .map(([k, ms]) => ({ date: Number(k), hours: Math.round((ms / 3600000) * 10) / 10 }))
+    .sort((a, b) => b.date - a.date);
+}
+
+// Recovery signals (for making the Recovery grade real + the in-session corroboration).
 export async function getRecoveryMetrics() {
-  if (!isHealthAvailable()) return { hrv: [], restingHr: [] };
-  const [hrv, restingHr] = await Promise.all([
+  if (!isHealthAvailable()) return { hrv: [], restingHr: [], sleep: [] };
+  const [hrv, restingHr, sleep] = await Promise.all([
     quantitySeries('HKQuantityTypeIdentifierHeartRateVariabilitySDNN', 'ms'),
     quantitySeries('HKQuantityTypeIdentifierRestingHeartRate', 'count/min'),
+    getSleepNights(),
   ]);
-  return { hrv, restingHr };
+  return { hrv, restingHr, sleep };
 }

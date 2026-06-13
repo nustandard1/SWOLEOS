@@ -246,6 +246,16 @@ export function computeRhrFlag(restingHr: { date: number; value: number }[] | nu
   return { elevated: delta >= 7, delta, recent: Math.round(recentMean), baseline: Math.round(baselineMean) };
 }
 
+// Sleep readiness flag (spec §4.7 / §9, confirmatory only). A multi-night deficit (recent
+// 3-night mean < 6h) corroborates a back-off — never the sole driver. null = thin data.
+export interface SleepFlag { deficit: boolean; hrs: number; }
+export function computeSleepFlag(nights: { date: number; hours: number }[] | null | undefined): SleepFlag | null {
+  if (!nights || nights.length < 3) return null;
+  const recent = nights.slice(0, 3);
+  const avg = recent.reduce((a, n) => a + n.hours, 0) / recent.length;
+  return { deficit: avg < 6, hrs: Math.round(avg * 10) / 10 };
+}
+
 // Structured-output defaults for the no-history / baseline state (§12.2: a quiet baseline
 // tag, no real call yet). Spread into the early returns so the card always has its fields.
 const EMPTY_CALL = {
@@ -260,7 +270,8 @@ export function buildProgressionGuidance(
   profile: CalibrationProfile,
   meta: ExerciseMeta,
   checkin?: LastCheckin | null,
-  rhr?: RhrFlag | null
+  rhr?: RhrFlag | null,
+  sleep?: SleepFlag | null
 ): ProgressionGuidance {
   const cls = classify(meta);
   const range = repRange(profile || {}, cls);
@@ -509,30 +520,36 @@ export function buildProgressionGuidance(
   const layoffPct = weeksOff >= 8 ? 0.125 : weeksOff >= 3 ? 0.075 : weeksOff >= 1.5 ? 0.05 : 0;
   const onLayoff = layoffPct > 0;
 
-  // Biometric corroboration (spec §9.2, cascade gate 2). RHR is CONFIRMATORY — it
-  // strengthens a back-off when performance already says so, never overrides a PR.
+  // Biometric corroboration (spec §9.2 / §4.7, cascade gate 2). RHR + sleep are
+  // CONFIRMATORY — they strengthen a back-off when performance already says so, never
+  // override a PR. Combined into one "bio evidence" signal/phrase.
   const rhrElevated = !!rhr?.elevated;
-  const rhrPhrase = rhr ? `RHR's run +${rhr.delta} bpm over your baseline` : '';
+  const sleepDeficit = !!sleep?.deficit;
+  const bioEvidence = rhrElevated || sleepDeficit;
+  const bioPhrase = [
+    rhrElevated ? `RHR's run +${rhr.delta} bpm over your baseline` : null,
+    sleepDeficit ? `you've averaged ${sleep.hrs}h sleep` : null,
+  ].filter(Boolean).join(' and ');
 
   // A REAL stall gets the blunt, animated voice — it's the headline. Recovery evidence
-  // (maxed RPE OR sustained-elevated RHR) routes "stuck" to a back-off, not "handle it".
+  // (maxed RPE OR elevated RHR OR a sleep deficit) routes "stuck" to a back-off.
   // Skipped on a layoff — flat numbers across a gap aren't a stall.
   if (plateau && !recoveryFlag && !onLayoff) {
     const stuck = stalls + 1;
-    if (rpeCeiling || rhrElevated) {
-      const why = rpeCeiling && rhrElevated ? `RPE's maxed (${avgRpe.toFixed(1)}) and ${rhrPhrase}`
+    if (rpeCeiling || bioEvidence) {
+      const why = rpeCeiling && bioEvidence ? `RPE's maxed (${avgRpe.toFixed(1)}) and ${bioPhrase}`
         : rpeCeiling ? `RPE's maxed (${avgRpe.toFixed(1)})`
-        : rhrPhrase;
+        : bioPhrase;
       coachNote = `Stuck ${stuck} sessions and ${why} — that's recovery, not effort. Take a lighter week, then attack it.`;
     } else {
       coachNote = `${stuck} sessions at ${topWeight}×${minRepAtTop} — quit spinning your wheels. Add ${inc} lbs or chase a rep. Handle business.`;
     }
-  } else if (rhrElevated && liftSlipping && !recoveryFlag && !onLayoff) {
-    // Slipping + sustained-elevated RHR, no formal stall yet — the corroborated back-off.
-    coachNote = `This lift's sliding and ${rhrPhrase} — back off and bank some recovery. Repeat ${sxr(setCount, minRepAtTop)} at ${topWeight} lbs at most.`;
-  } else if (rhrElevated && !liftProgressing && !caution && !onLayoff) {
-    // Neutral session but RHR is up — a quiet watch, don't change the prescription.
-    caution = `Heads up — ${rhrPhrase}. Keep an eye on recovery this week.`;
+  } else if (bioEvidence && liftSlipping && !recoveryFlag && !onLayoff) {
+    // Slipping + a recovery flag, no formal stall yet — the corroborated back-off.
+    coachNote = `This lift's sliding and ${bioPhrase} — back off and bank some recovery. Repeat ${sxr(setCount, minRepAtTop)} at ${topWeight} lbs at most.`;
+  } else if (bioEvidence && !liftProgressing && !caution && !onLayoff) {
+    // Neutral session but recovery markers are off — a quiet watch, don't change the call.
+    caution = `Heads up — ${bioPhrase}. Keep an eye on recovery this week.`;
   }
   // Coming back from a layoff: re-anchor light and climb fast (takes precedence over the
   // normal progression call, but a fresh recovery check-in still wins below).
@@ -605,6 +622,7 @@ export function buildProgressionGuidance(
     trendWord,
   ];
   if (rhrElevated && rhr) dataUsed.push(`RHR +${rhr.delta} bpm`);
+  if (sleepDeficit && sleep) dataUsed.push(`Sleep ${sleep.hrs}h`);
 
   return {
     lastSummary,

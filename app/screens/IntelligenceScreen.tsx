@@ -108,18 +108,25 @@ export default function IntelligenceScreen() {
                 <View style={[s.bdStat, s.bdStatB]}><Text style={s.bdStatV}>{bd.avgRpe ?? '—'}</Text><Text style={s.bdStatL}>AVG RPE</Text></View>
               </View>
               <Text style={s.bdWindow}>LAST 28 DAYS</Text>
-              <Text style={s.bdSecLbl}>WORKING SETS BY MUSCLE</Text>
+              <Text style={s.bdSecLbl}>WEEKLY SETS vs LANDMARKS</Text>
               {bd.muscles.length === 0 ? (
                 <Text style={s.bdEmpty}>No working sets in the window yet.</Text>
-              ) : bd.muscles.map(m => (
-                <View key={m.m} style={s.musRow}>
-                  <Text style={s.musName}>{cap(m.m)}</Text>
-                  <View style={s.musTrack}>
-                    <View style={[s.musFill, { width: `${Math.round((m.sets / maxSets) * 100)}%` }]} />
+              ) : bd.muscles.map(m => {
+                // ~weekly hard sets (28-day total / 4) vs MEV/MAV bands (spec §4.5).
+                const wk = Math.round((m.sets / 4) * 10) / 10;
+                const lm = wk < 6 ? { t: 'LOW', c: '#FF8A3D' } : wk <= 16 ? { t: 'PRODUCTIVE', c: '#46C26A' } : wk <= 25 ? { t: 'HIGH', c: '#FF8A3D' } : { t: 'EXCESS', c: '#FF5A4A' };
+                return (
+                  <View key={m.m} style={s.musRow}>
+                    <Text style={s.musName}>{cap(m.m)}</Text>
+                    <View style={s.musTrack}>
+                      <View style={[s.musFill, { width: `${Math.round((m.sets / maxSets) * 100)}%` }]} />
+                    </View>
+                    <Text style={s.musWk}>{wk}/wk</Text>
+                    <Text style={[s.musVerdict, { color: lm.c }]}>{lm.t}</Text>
                   </View>
-                  <Text style={s.musVal}>{m.sets}</Text>
-                </View>
-              ))}
+                );
+              })}
+              <Text style={s.bdBands}>MEV ~6 · productive 6–16 · diminishing 17–25 · likely junk 25+ (hard sets / week)</Text>
             </View>
           )}
 
@@ -168,9 +175,11 @@ const s = StyleSheet.create({
   bdWindow: { fontFamily: fonts.bodySemi, fontSize: 8, color: colors.dim, letterSpacing: 1, textAlign: 'center', marginTop: 7 },
   bdSecLbl: { fontFamily: fonts.bodySemi, fontSize: 9, color: colors.muted, letterSpacing: 1.4, marginTop: 14, marginBottom: 8, textTransform: 'uppercase' },
   bdEmpty: { fontFamily: fonts.body, fontSize: 12, color: colors.dim },
-  musRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 7 },
-  musName: { fontFamily: fonts.bodySemi, fontSize: 11, color: colors.muted, width: 72, textTransform: 'uppercase', letterSpacing: 0.3 },
+  musRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  musName: { fontFamily: fonts.bodySemi, fontSize: 11, color: colors.muted, width: 64, textTransform: 'uppercase', letterSpacing: 0.3 },
   musTrack: { flex: 1, height: 8, backgroundColor: colors.surf2, borderRadius: 4, overflow: 'hidden' },
   musFill: { height: '100%', backgroundColor: colors.acc, borderRadius: 4 },
-  musVal: { fontFamily: fonts.bodyBold, fontSize: 12, color: colors.text, width: 22, textAlign: 'right' },
+  musWk: { fontFamily: fonts.bodyBold, fontSize: 11, color: colors.muted, width: 38, textAlign: 'right', fontVariant: ['tabular-nums'] },
+  musVerdict: { fontFamily: fonts.bodyBold, fontSize: 8.5, letterSpacing: 0.6, width: 64, textAlign: 'right' },
+  bdBands: { fontFamily: fonts.body, fontSize: 10, color: colors.dim, lineHeight: 15, marginTop: 6 },
 });
